@@ -24,6 +24,14 @@ A few things worth knowing up front:
 This is GPL-3 (because FBInk is). No game ROMs are included. Bring your own.
 See `LICENSE` and `NOTICE.md`.
 
+<p align="center">
+  <img src="docs/screenshots/browser.png" width="30%" alt="ROM picker">
+  <img src="docs/screenshots/gameplay.png" width="30%" alt="in-game with on-screen controls">
+  <img src="docs/screenshots/menu.png" width="30%" alt="pause menu">
+</p>
+
+<p align="center"><sub>Shown with <a href="https://github.com/mattcurrie/dmg-acid2">dmg-acid2</a>, an open Game Boy PPU test ROM — no copyrighted game ROMs ship in this repo, but any <code>.gb</code> you own runs the same way.</sub></p>
+
 ---
 
 ## Does it run on my Kindle?
