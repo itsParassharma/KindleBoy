@@ -51,104 +51,18 @@ it by copying the binary to `/var/tmp` first, so you're covered either way.
 
 ---
 
-## The honest catch: you have to compile the binary
+## Getting started
 
-KindleBoy is a native ARM program. I can't hand you a ready-to-run `.exe` for
-the Kindle the way you'd copy a script. It's machine code for the Kindle's CPU,
-and it has to be *cross-compiled* on a Linux machine (or WSL on Windows). That's
-a one-time setup, maybe 20 minutes, and then rebuilds take seconds.
-
-Everything *else* in the extension is ready to paste. The only missing piece is
-`bin/kindleboy`, which the build produces.
-
----
-
-## Easiest: download a prebuilt binary
-
-You don't have to build anything. Every push is cross-compiled by GitHub Actions,
-and tagged releases carry a ready-to-copy extension folder:
-
-**https://github.com/itsParassharma/KindleBoy/releases**
-
-- Firmware 5.16.3 or newer (e.g. a 10th-gen on 5.17.1) → **`kindleboy-kindlehf.zip`**
-- Older firmware, or if the hf build won't launch → `kindleboy-kindlepw2.zip`
-
-Unzip it, drop the `kindleboy` folder into `extensions/` on the Kindle, put a
-`.gb` in `roms/gb/` (it also checks the extension folder), and launch
-**KUAL → KindleBoy → Play**.
-
-The rest of this section is only if you want to build it yourself.
-
-## Building it yourself
-
-You need Linux. On Windows that means WSL:
-
-```powershell
-# Admin PowerShell, one time. Reboots afterward.
-wsl --install
-```
-
-Then, inside Ubuntu:
-
-```bash
-sudo apt update
-sudo apt install -y build-essential git libsdl2-dev
-```
-
-### Desktop build (play on your PC, no Kindle needed)
-
-Great for trying games and testing before you deploy:
-
-```bash
-make desktop
-./build/kindleboy_desktop path/to/game.gb   # or leave the ROM off to get the browser
-```
-
-Keys: **arrows** move, **Z** = B, **X** = A, **Enter** = Start,
-**Right-Shift** = Select, **Esc** = pause menu, **click** = touch.
-Run with `KINDLEBOY_EINK=1` to fake the ~8fps e-ink feel.
-
-### Kindle build
-
-1. Grab the cross-compiler (koxtoolchain, `kindlepw2`). Prebuilt is easiest:
-
-   ```bash
-   cd ~
-   # download kindlepw2.tar.gz from https://github.com/koreader/koxtoolchain/releases
-   tar xzf kindlepw2.tar.gz
-   export PATH="$HOME/x-tools/arm-kindlepw2-linux-gnueabi/bin:$PATH"
-   arm-kindlepw2-linux-gnueabi-gcc --version   # should print a version
-   ```
-   (Drop that `export PATH` line into `~/.bashrc` so it sticks.)
-
-2. Grab FBInk (it lives in `vendor/`, we don't check it in):
-
-   ```bash
-   git clone --recursive https://github.com/NiLuJe/FBInk vendor/FBInk
-   ```
-
-3. Build:
-
-   ```bash
-   make fbink     # builds FBInk once
-   make kindle    # -> build/kindleboy
-   ```
-
-### Getting it onto the Kindle
-
-Plug in the Kindle over USB (it shows up as a drive), then:
-
-```bash
-make deploy KINDLE=/mnt/e     # point KINDLE at the Kindle's mount
-```
-
-That drops the extension at `<kindle>/extensions/kindleboy/` and makes a
-`roms/gb/` folder. Copy your `.gb` files into `roms/gb/`, unplug, and on the
-Kindle open **KUAL → KindleBoy → Play**.
-
-You can also just drag the files across in Explorer: put the `kual/kindleboy`
-folder at `extensions/kindleboy` on the Kindle, with the compiled binary at
-`extensions/kindleboy/bin/kindleboy`.
+1. Go to the [Releases page](https://github.com/itsParassharma/KindleBoy/releases)
+   (every push is cross-compiled by GitHub Actions, so tagged releases always
+   carry a ready-to-copy extension folder).
+2. Download the zip for your firmware:
+   - Firmware 5.16.3 or newer (e.g. a 10th-gen on 5.17.1) → **`kindleboy-kindlehf.zip`**
+   - Older firmware, or if the hf build won't launch → `kindleboy-kindlepw2.zip`
+3. Unzip it.
+4. Drop the `kindleboy` folder into `extensions/` on the Kindle.
+5. Put a `.gb` ROM in `roms/gb/` (it also checks the extension folder).
+6. On the Kindle, launch **KUAL → KindleBoy → Play**.
 
 ---
 
@@ -204,28 +118,3 @@ buffer. The platform layer's only jobs are to show rectangles of that buffer and
 to handle input. That's why the desktop build looks pixel-for-pixel identical to
 the Kindle, and why almost everything could be built and tested without the
 device.
-
----
-
-## Testing without a Kindle
-
-```bash
-make headless && ./build/headless dmg-acid2.gb 120 30 120   # dump frames as images
-make sim      && ./build/simrun play dmg-acid2.gb            # render the real UI to images
-```
-
-`sim` runs the actual app (browse → play → pause menu) against a fake in-memory
-screen and saves snapshots, so you can eyeball UI and rendering changes with no
-device and no SDL. It's how the browser, controls, dithering, and menu were
-checked. See `test/`.
-
-### First things to check on the actual device
-
-The only stuff that genuinely can't be tested off-device is the e-ink behavior.
-After your first deploy:
-
-1. **Frame rate.** Confirm A2 holds ~7-8fps and the dither looks readable
-   (`/mnt/us/kindleboy.log` reports it). If it drags, nudge the defaults toward
-   the slower-but-cleaner DU/QUALITY modes: nothing else changes.
-2. **Touch.** Make sure taps land where you expect (the log shows the transform).
-3. Then just play something and confirm saves and a clean exit.
