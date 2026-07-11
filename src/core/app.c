@@ -33,7 +33,8 @@
 
 /* ---- tuning constants ---------------------------------------------------- */
 #define GB_FRAME_US        16742      /* 59.73 Hz */
-#define PRESENT_FAST_US    125000     /* ~8 fps A2 */
+#define PRESENT_FAST_US    112000     /* ~8.5 fps A2 (panel's real ceiling) */
+#define INPUT_BOOST_US     150000     /* after a new button press, present ASAP for a bit */
 #define PRESENT_QUALITY_US 450000     /* ~2.2 fps GL16 */
 #define QUIET_US           700000     /* still-scene threshold */
 #define A2_SOFT            120         /* A2 presents before a GL16 promo flashes */
@@ -77,6 +78,12 @@ static bool     ff_on;
 static bool     prev_save_touch, prev_ff_touch;
 static uint64_t save_feedback_until;
 
+/* present-on-input: a fresh button press opens a short window during which we
+ * present as soon as the panel is free instead of waiting out the rate limit,
+ * so movement and menus respond a refresh sooner. */
+static uint64_t boost_until_us;
+static uint8_t  prev_joypad_bits;
+
 /* ---- helpers ------------------------------------------------------------- */
 
 static void present_full(plat_refresh_t mode)
@@ -93,7 +100,9 @@ static bool browser_needs_flash = true;
 static void show_browser(void)
 {
 	browser_draw(&browser, canvas, fbw, fbh);
-	present_full(browser_needs_flash ? REFRESH_FLASH : REFRESH_QUALITY);
+	/* First paint clears with a full flash; scroll/selection steps use the fast
+	 * B/W DU waveform (~230ms) instead of GL16 (~450ms) so navigation is snappy. */
+	present_full(browser_needs_flash ? REFRESH_FLASH : REFRESH_BW);
 	browser_needs_flash = false;
 	plat_wait_refresh();
 }
@@ -175,6 +184,8 @@ static bool enter_playing(int idx)
 	ff_on = false;
 	prev_save_touch = prev_ff_touch = false;
 	save_feedback_until = 0;
+	boost_until_us = 0;
+	prev_joypad_bits = 0;
 
 	/* Remember for next launch. */
 	strncpy(cfg->last_rom, path, sizeof cfg->last_rom - 1);
@@ -196,7 +207,10 @@ static void play_present(uint64_t now)
 	if (dirty) {
 		last_activity_us = now;
 		promoted = false;
-		if (now - last_present_us < min_interval)
+		/* Honour the rate limit unless a recent button press is boosting us
+		 * and the panel is already free (never stall emulation on the panel). */
+		bool boosting = now < boost_until_us && !plat_refresh_busy();
+		if (!boosting && now - last_present_us < min_interval)
 			return;
 
 		/* Periodic full cleanup: a GC16 flash of the game area PLUS the
@@ -398,7 +412,7 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			menu_action_t act = menu_input(&menu, &in, fbw, fbh, &changed);
 			if (act != MENU_NONE) handle_menu_action(act);
 			else if (changed) { menu_draw(&menu, canvas, fbw, fbh, cfg->quality_mode);
-					    present_full(REFRESH_QUALITY); }
+					    present_full(REFRESH_BW); }   /* fast B/W step */
 			plat_sleep_us(30000);
 			continue;
 		}
@@ -447,6 +461,11 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 		}
 		prev_save_touch = sp.save;
 		prev_ff_touch   = sp.ff;
+
+		/* A newly-pressed button opens the present-ASAP window. */
+		if (joypad & ~prev_joypad_bits)
+			boost_until_us = plat_now_us() + INPUT_BOOST_US;
+		prev_joypad_bits = joypad;
 
 		emu_run_frame(&emu, joypad);
 		if (ff_on)

@@ -122,8 +122,8 @@ static FBInkConfig *cfg_for(plat_refresh_t mode)
 static uint64_t wave_us(int mode)
 {
 	switch (mode) {
-	case REFRESH_FAST:    return 150000;
-	case REFRESH_BW:      return 260000;
+	case REFRESH_FAST:    return 115000;   /* A2 is ~120ms; present() waits if it's still busy */
+	case REFRESH_BW:      return 230000;
 	case REFRESH_QUALITY: return 450000;
 	case REFRESH_FLASH:   return 600000;
 	default:              return 450000;

@@ -4,6 +4,10 @@
 #include "render.h"
 #include <string.h>
 
+/* Widest scaled game row we build on the stack (covers every Kindle panel:
+ * 160px * scale, and scale tops out around 7 even on the largest). */
+#define RENDER_MAX_W (GB_W * 12)
+
 /* 4-gray levels for QUALITY / GL16, indexed by DMG shade (0=white .. 3=black). */
 static const uint8_t gray4[4] = { 0xFF, 0xAA, 0x55, 0x00 };
 
@@ -59,31 +63,69 @@ void render_game(const emu_t *e, const render_cfg_t *cfg, uint8_t *canvas,
 	const int scale = cfg->scale;
 	const int ox = cfg->dst_x;
 	const int oy = cfg->dst_y;
+	const int gw = cfg->game_w;              /* == scale * GB_W */
 
-	for (int sy = src_y0; sy <= src_y1; sy++) {
-		const uint8_t *srow = e->lcd[sy];
-		for (int ry = 0; ry < scale; ry++) {
-			int dy = oy + sy * scale + ry;
-			uint8_t *drow = canvas + (size_t)dy * canvas_w + ox;
-			int dyp = dy & 1;
-
-			if (quality) {
-				/* Each source pixel -> scale identical cells. */
+	/* Each source row expands to `scale` output rows. In QUALITY those rows are
+	 * all identical; in FAST the dither only depends on the row's y-parity, so
+	 * there are just two distinct rows. Build the distinct row(s) once per
+	 * source row and memcpy the rest — same pixels, ~1/scale of the work. A
+	 * generous stack buffer covers every Kindle scale; anything larger falls
+	 * back to the straightforward path. */
+	if (gw <= RENDER_MAX_W) {
+		if (quality) {
+			uint8_t row[RENDER_MAX_W];
+			for (int sy = src_y0; sy <= src_y1; sy++) {
+				const uint8_t *srow = e->lcd[sy];
 				int dx = 0;
 				for (int sx = 0; sx < GB_W; sx++) {
 					uint8_t g = gray4[srow[sx] & 3];
-					for (int rx = 0; rx < scale; rx++)
-						drow[dx++] = g;
+					for (int rx = 0; rx < scale; rx++) row[dx++] = g;
 				}
-			} else {
-				/* Screen-anchored Bayer: each cell keyed to its
-				 * absolute (dx,dy) parity for temporal stability. */
-				int dx = 0;
+				for (int ry = 0; ry < scale; ry++) {
+					int dy = oy + sy * scale + ry;
+					memcpy(canvas + (size_t)dy * canvas_w + ox, row, (size_t)gw);
+				}
+			}
+		} else {
+			uint8_t rowp[2][RENDER_MAX_W];   /* one per y-parity */
+			for (int sy = src_y0; sy <= src_y1; sy++) {
+				const uint8_t *srow = e->lcd[sy];
+				bool built[2] = { false, false };
+				for (int ry = 0; ry < scale; ry++) {
+					int dy = oy + sy * scale + ry;
+					int p = dy & 1;
+					if (!built[p]) {
+						int dx = 0;
+						for (int sx = 0; sx < GB_W; sx++) {
+							const uint8_t (*d)[2] = dither_bw[srow[sx] & 3];
+							for (int rx = 0; rx < scale; rx++) {
+								int dxa = ox + dx;
+								rowp[p][dx++] = d[p][dxa & 1];
+							}
+						}
+						built[p] = true;
+					}
+					memcpy(canvas + (size_t)dy * canvas_w + ox, rowp[p], (size_t)gw);
+				}
+			}
+		}
+	} else {
+		for (int sy = src_y0; sy <= src_y1; sy++) {
+			const uint8_t *srow = e->lcd[sy];
+			for (int ry = 0; ry < scale; ry++) {
+				int dy = oy + sy * scale + ry;
+				uint8_t *drow = canvas + (size_t)dy * canvas_w + ox;
+				int dyp = dy & 1, dx = 0;
 				for (int sx = 0; sx < GB_W; sx++) {
-					const uint8_t (*d)[2] = dither_bw[srow[sx] & 3];
-					for (int rx = 0; rx < scale; rx++) {
-						int dxa = ox + dx;
-						drow[dx++] = d[dyp][dxa & 1];
+					if (quality) {
+						uint8_t g = gray4[srow[sx] & 3];
+						for (int rx = 0; rx < scale; rx++) drow[dx++] = g;
+					} else {
+						const uint8_t (*d)[2] = dither_bw[srow[sx] & 3];
+						for (int rx = 0; rx < scale; rx++) {
+							int dxa = ox + dx;
+							drow[dx++] = d[dyp][dxa & 1];
+						}
 					}
 				}
 			}

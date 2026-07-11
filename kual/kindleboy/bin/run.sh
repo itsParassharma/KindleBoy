@@ -50,6 +50,16 @@ export KINDLEBOY_CFG="$EXT/kindleboy.cfg"
 lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>> "$LOG"
 lipc-set-prop com.lab126.pillow disableEnablePillow disable 2>> "$LOG"
 
+# Pin the CPU to full speed while playing, restoring the original governor on
+# exit. Tolerant of devices that don't expose cpufreq (the writes just fail).
+GOV_PATH="/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
+OLD_GOV=""
+if [ -w "$GOV_PATH" ]; then
+    OLD_GOV="$(cat "$GOV_PATH" 2>/dev/null)"
+    echo performance > "$GOV_PATH" 2>> "$LOG"
+    echo "-- cpu governor: $OLD_GOV -> performance --" >> "$LOG"
+fi
+
 STOPPED=""
 if [ "$1" = "stopfw" ]; then
     echo "-- stopping UI (explicit stopfw mode) --" >> "$LOG"
@@ -64,6 +74,9 @@ fi
 echo "=== launching binary ===" >> "$LOG"
 "$RUN" >> "$LOG" 2>&1
 echo "=== binary exited, code=$? ===" >> "$LOG"
+
+# Restore the CPU governor.
+[ -n "$OLD_GOV" ] && echo "$OLD_GOV" > "$GOV_PATH" 2>> "$LOG"
 
 [ "$STOPPED" = "framework" ]  && initctl start framework >> "$LOG" 2>&1
 [ "$STOPPED" = "lab126_gui" ] && start lab126_gui >> "$LOG" 2>&1

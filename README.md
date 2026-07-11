@@ -11,8 +11,8 @@ touching the Kindle.
 
 A few things worth knowing up front:
 
-- The emulator itself is [Peanut-GB](https://github.com/deltabeard/Peanut-GB) —
-  a tiny, rock-solid Game Boy core that people already run on microcontrollers.
+- The emulator itself is [Peanut-GB](https://github.com/deltabeard/Peanut-GB), a
+  tiny, rock-solid Game Boy core that people already run on microcontrollers.
   Its output is 4 shades of gray, which is exactly what e-ink wants.
 - The screen is driven through [FBInk](https://github.com/NiLuJe/FBInk), which
   hides all the messy per-model differences in how Kindle e-ink panels refresh.
@@ -21,7 +21,7 @@ A few things worth knowing up front:
   refresh mode with a dither so motion stays crisp. When you stop and a screen
   sits still (a dialog box, a menu), it quietly upgrades to a clean 4-gray image.
 
-This is GPL-3 (because FBInk is). No game ROMs are included — bring your own.
+This is GPL-3 (because FBInk is). No game ROMs are included. Bring your own.
 See `LICENSE` and `NOTICE.md`.
 
 ---
@@ -29,7 +29,7 @@ See `LICENSE` and `NOTICE.md`.
 ## Does it run on my Kindle?
 
 **10th gen, firmware 5.17.1: yes.** The binary is built fully static, so it
-doesn't care that 5.17.1 uses a hard-float userland — everything it needs is
+doesn't care that 5.17.1 uses a hard-float userland: everything it needs is
 baked into the one file, and it talks to the kernel the same way regardless.
 That's the whole reason we build it static.
 
@@ -46,7 +46,7 @@ it by copying the binary to `/var/tmp` first, so you're covered either way.
 ## The honest catch: you have to compile the binary
 
 KindleBoy is a native ARM program. I can't hand you a ready-to-run `.exe` for
-the Kindle the way you'd copy a script — it's machine code for the Kindle's CPU,
+the Kindle the way you'd copy a script. It's machine code for the Kindle's CPU,
 and it has to be *cross-compiled* on a Linux machine (or WSL on Windows). That's
 a one-time setup, maybe 20 minutes, and then rebuilds take seconds.
 
@@ -66,7 +66,7 @@ and tagged releases carry a ready-to-copy extension folder:
 - Older firmware, or if the hf build won't launch → `kindleboy-kindlepw2.zip`
 
 Unzip it, drop the `kindleboy` folder into `extensions/` on the Kindle, put a
-`.gb` in `roms/gb/` (or in the extension folder — it searches both), and launch
+`.gb` in `roms/gb/` (it also checks the extension folder), and launch
 **KUAL → KindleBoy → Play**.
 
 The rest of this section is only if you want to build it yourself.
@@ -87,7 +87,7 @@ sudo apt update
 sudo apt install -y build-essential git libsdl2-dev
 ```
 
-### Desktop build (play on your PC — no Kindle needed)
+### Desktop build (play on your PC, no Kindle needed)
 
 Great for trying games and testing before you deploy:
 
@@ -148,14 +148,14 @@ folder at `extensions/kindleboy` on the Kindle, with the compiled binary at
 
 The game sits at the top of the screen; the controls are drawn underneath:
 
-- **Left:** a D-pad. The corners work — hold down-left to go diagonally.
+- **Left:** a D-pad. The corners work: hold down-left to go diagonally.
 - **Right:** **A** (top) and **B** (bottom), like a real Game Boy.
 - **Middle:** **START**, **SELECT**, and **MENU**.
 
 Tap **MENU** to pause. From there you can save/load a state, flip between FAST
 and QUALITY display modes, force a screen cleanup ("Deghost Now"), go back to the
-game list, or quit. You can hold a direction and press A at the same time —
-multi-touch works.
+game list, or quit. You can hold a direction and press A at the same time.
+Multi-touch works.
 
 Your progress saves automatically: `game.sav` for the in-game battery save
 (written safely so a yanked cable won't corrupt it), and `game.st` for save
@@ -165,13 +165,13 @@ states.
 
 ## When something's off
 
-- **Nothing happens on launch?** Check `/mnt/us/kindleboy.log` — everything the
+- **Nothing happens on launch?** Check `/mnt/us/kindleboy.log`: everything the
   program does gets logged there.
 - **Won't run at all?** Probably the noexec thing. `run.sh` already copies to
   `/var/tmp`, but if it still won't go, try the **Play (stop framework)** menu
   item, which frees up the device more aggressively.
 - **Touch feels offset or mirrored?** The startup log prints the touch transform
-  it picked up from FBInk plus the raw coordinate range — grab those lines if you
+  it picked up from FBInk plus the raw coordinate range. Grab those lines if you
   want to report it.
 - **Ghosting / smearing over time?** Open and close the menu (that forces a full
   screen cleanup), or hit **Deghost Now**. If it bugs you, switch to QUALITY mode.
@@ -191,7 +191,7 @@ core (runs anywhere)                 platform (pick one)
         \___________ platform.h (the one seam) ____________/
 ```
 
-The core draws *every* pixel — game, menus, buttons — into a plain grayscale
+The core draws *every* pixel (game, menus, buttons) into a plain grayscale
 buffer. The platform layer's only jobs are to show rectangles of that buffer and
 to handle input. That's why the desktop build looks pixel-for-pixel identical to
 the Kindle, and why almost everything could be built and tested without the
@@ -216,8 +216,8 @@ checked. See `test/`.
 The only stuff that genuinely can't be tested off-device is the e-ink behavior.
 After your first deploy:
 
-1. **Frame rate.** Confirm A2 holds ~7–8fps and the dither looks readable
+1. **Frame rate.** Confirm A2 holds ~7-8fps and the dither looks readable
    (`/mnt/us/kindleboy.log` reports it). If it drags, nudge the defaults toward
-   the slower-but-cleaner DU/QUALITY modes — nothing else changes.
+   the slower-but-cleaner DU/QUALITY modes: nothing else changes.
 2. **Touch.** Make sure taps land where you expect (the log shows the transform).
 3. Then just play something and confirm saves and a clean exit.
