@@ -30,7 +30,26 @@ See `LICENSE` and `NOTICE.md`.
   <img src="docs/screenshots/menu.png" width="30%" alt="pause menu">
 </p>
 
-<p align="center"><sub>Shown with <a href="https://github.com/mattcurrie/dmg-acid2">dmg-acid2</a>, an open Game Boy PPU test ROM — no copyrighted game ROMs ship in this repo, but any <code>.gb</code> you own runs the same way.</sub></p>
+<p align="center"><sub>Shown with <a href="https://github.com/mattcurrie/dmg-acid2">dmg-acid2</a>, an open Game Boy PPU test ROM. No copyrighted game ROMs ship in this repo, but any <code>.gb</code> you own runs the same way.</sub></p>
+
+---
+
+## Features
+
+- Plays real Game Boy games (`.gb` files you own)
+- Pick a game from a list on the Kindle, no file editing needed
+- On-screen touch controls: D-pad, A, B, Start, Select, and a menu
+- Battery saves work like the real cartridge, and won't corrupt if you unplug mid-write
+- Save states to save and load anywhere in a game
+- Resume drops you back exactly where you left off when you reopen a game
+- Fast-forward button runs the game at 3x to skip slow text
+- Fast mode for smooth motion, or a quality mode for a crisper picture
+- Clock and battery level shown at the top of the screen
+- A deghost button, plus automatic cleanup, to stop the e-ink smearing over time
+- Auto-pauses after a few idle minutes to save battery
+- Runs over the normal Kindle screen without touching your books or settings
+- Settings live in a plain text file you can edit
+- One binary that runs on 10th and 11th gen Kindles
 
 ---
 
@@ -68,20 +87,21 @@ it by copying the binary to `/var/tmp` first, so you're covered either way.
 
 ## Playing
 
-The game sits at the top of the screen; the controls are drawn underneath:
+A clock and battery sit at the very top. The game is below that, and the
+controls fill the bottom:
 
-- **Left:** a D-pad. The corners work: hold down-left to go diagonally.
-- **Right:** **A** (top) and **B** (bottom), like a real Game Boy.
-- **Middle:** **START**, **SELECT**, and **MENU**.
+- Left: a D-pad. The corners work, so hold down-left to move diagonally.
+- Right: A (top) and B (bottom), staggered like a real Game Boy.
+- Bottom row: START, SELECT, MENU, DEGHOST, and FF (fast-forward).
 
-Tap **MENU** to pause. From there you can save/load a state, flip between FAST
-and QUALITY display modes, force a screen cleanup ("Deghost Now"), go back to the
-game list, or quit. You can hold a direction and press A at the same time.
-Multi-touch works.
+Tap MENU to pause, where you can save or load a state, switch between Fast and
+Quality display, clean up the screen, go back to the game list, or quit. You can
+hold a direction and press A at the same time. Multi-touch works.
 
-Your progress saves automatically: `game.sav` for the in-game battery save
-(written safely so a yanked cable won't corrupt it), and `game.st` for save
-states.
+DEGHOST wipes any e-ink smearing straight away. FF runs the game at 3x, handy
+for grinding through dialog. Your progress saves on its own (`game.sav` for the
+in-game save, `game.st` for save states), and reopening a game resumes where you
+stopped.
 
 ---
 
