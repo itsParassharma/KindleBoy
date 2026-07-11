@@ -8,13 +8,13 @@
           "name": "Play",
           "priority": 0,
           "action": "bin/run.sh",
-          "params": "stopfw",
           "exitmenu": true
         },
         {
-          "name": "Play (keep Kindle UI - may stay hidden)",
+          "name": "Play (stop Kindle UI - advanced)",
           "priority": 1,
           "action": "bin/run.sh",
+          "params": "stopfw",
           "exitmenu": true
         }
       ]
