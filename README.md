@@ -30,8 +30,6 @@ See `LICENSE` and `NOTICE.md`.
   <img src="docs/screenshots/menu.png" width="30%" alt="pause menu">
 </p>
 
-<p align="center"><sub>Shown with <a href="https://github.com/mattcurrie/dmg-acid2">dmg-acid2</a>, an open Game Boy PPU test ROM. No copyrighted game ROMs ship in this repo, but any <code>.gb</code> you own runs the same way.</sub></p>
-
 ---
 
 ## Features
