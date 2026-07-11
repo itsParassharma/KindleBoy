@@ -32,12 +32,12 @@ static void build_dither(void)
 	dither_ready = true;
 }
 
-void render_layout(render_cfg_t *cfg, int fb_w, int fb_h, int min_overlay_h)
+void render_layout(render_cfg_t *cfg, int fb_w, int fb_h, int top_reserve, int min_overlay_h)
 {
 	int s = fb_w / GB_W;
 	if (s < 1) s = 1;
-	/* Shrink until the game leaves room for the overlay below it. */
-	while (s > 1 && s * GB_H > fb_h - min_overlay_h)
+	/* Shrink until the game fits between the status bar and the overlay. */
+	while (s > 1 && s * GB_H > fb_h - top_reserve - min_overlay_h)
 		s--;
 
 	cfg->scale  = s;
@@ -45,7 +45,7 @@ void render_layout(render_cfg_t *cfg, int fb_w, int fb_h, int min_overlay_h)
 	cfg->game_h = s * GB_H;
 	cfg->dst_x  = (fb_w - cfg->game_w) / 2;         /* center horizontally */
 	if (cfg->dst_x < 0) cfg->dst_x = 0;
-	cfg->dst_y  = 8;                                 /* small top margin */
+	cfg->dst_y  = top_reserve + 4;                   /* below the status bar */
 	if (cfg->dst_y + cfg->game_h > fb_h)
 		cfg->dst_y = 0;
 }

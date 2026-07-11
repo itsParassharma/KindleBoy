@@ -91,6 +91,15 @@ typedef struct {
 /* Drain the input queue without blocking and report current state in *out. */
 void plat_input_poll(plat_input_t *out);
 
+/* Block up to timeout_ms waiting for input to arrive, then return (the caller
+ * still calls plat_input_poll). Lets idle menu/browser screens sleep instead of
+ * busy-polling — near-zero CPU while nothing is happening, instant on a touch.
+ * A plain sleep is an acceptable implementation. */
+void plat_input_wait(int timeout_ms);
+
+/* Current battery charge 0..100, or -1 if unknown. */
+int  plat_battery_percent(void);
+
 /* ---- timing / misc ------------------------------------------------------- */
 
 uint64_t plat_now_us(void);            /* monotonic microseconds */

@@ -19,6 +19,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <signal.h>
+#include <poll.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <linux/input.h>
 
@@ -160,6 +162,17 @@ void plat_input_poll(plat_input_t *out)
 	}
 	out->count = count;
 	out->quit_requested = g_should_quit ? true : false;
+}
+
+void plat_input_wait(int timeout_ms)
+{
+	if (s_fd >= 0) {
+		struct pollfd pfd = { .fd = s_fd, .events = POLLIN };
+		poll(&pfd, 1, timeout_ms);   /* returns early on touch, else on timeout */
+	} else {
+		struct timespec ts = { timeout_ms / 1000, (long)(timeout_ms % 1000) * 1000000L };
+		nanosleep(&ts, NULL);
+	}
 }
 
 void kindle_input_close(void)

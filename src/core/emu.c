@@ -90,9 +90,14 @@ static void lcd_line_cb(struct gb_s *gb, const uint8_t *pixels,
 		row[x] = pixels[x] & 0x03;
 
 	if (memcmp(row, e->lcd[line], GB_W) != 0) {
+		int first = 0, last = GB_W - 1;
+		while (first < GB_W && row[first] == e->lcd[line][first]) first++;
+		while (last > first && row[last] == e->lcd[line][last]) last--;
 		memcpy(e->lcd[line], row, GB_W);
 		if ((int)line < e->dirty_min_y) e->dirty_min_y = line;
 		if ((int)line > e->dirty_max_y) e->dirty_max_y = line;
+		if (first < e->dirty_min_x) e->dirty_min_x = first;
+		if (last  > e->dirty_max_x) e->dirty_max_x = last;
 	}
 	e->have_frame = true;
 }
@@ -157,6 +162,8 @@ int emu_load(emu_t *e, const char *rom_path)
 	memset(e, 0, sizeof *e);
 	e->dirty_min_y = 0;
 	e->dirty_max_y = GB_H - 1;   /* first present paints the whole frame */
+	e->dirty_min_x = 0;
+	e->dirty_max_x = GB_W - 1;
 	strncpy(e->rom_path, rom_path, sizeof e->rom_path - 1);
 
 	/* Read the whole ROM. */
@@ -229,6 +236,8 @@ void emu_frame_consumed(emu_t *e)
 {
 	e->dirty_min_y = GB_H;    /* min > max == clean */
 	e->dirty_max_y = -1;
+	e->dirty_min_x = GB_W;
+	e->dirty_max_x = -1;
 }
 
 int emu_sram_flush(emu_t *e)
@@ -332,6 +341,8 @@ int emu_state_load(emu_t *e)
 	e->gb.direct.frame_skip = true;   /* gb_init_lcd cleared it; restore policy */
 	e->dirty_min_y = 0;               /* force a full repaint of the restored frame */
 	e->dirty_max_y = GB_H - 1;
+	e->dirty_min_x = 0;
+	e->dirty_max_x = GB_W - 1;
 	e->sram_dirty = true;             /* cart RAM may differ now; persist it */
 	plat_log("emu: state_load %s ok", path);
 	return EMU_OK;

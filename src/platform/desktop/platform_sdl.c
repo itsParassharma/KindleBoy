@@ -151,6 +151,15 @@ void plat_sleep_us(uint64_t us)
 	if (us >= 1000) SDL_Delay((Uint32)(us / 1000));
 }
 
+void plat_input_wait(int timeout_ms)
+{
+	SDL_Event e;
+	if (SDL_WaitEventTimeout(&e, timeout_ms))
+		SDL_PushEvent(&e);   /* put it back for plat_input_poll to consume */
+}
+
+int plat_battery_percent(void) { return 77; }   /* fake on desktop, to exercise the UI */
+
 void plat_log(const char *fmt, ...)
 {
 	va_list ap; va_start(ap, fmt);

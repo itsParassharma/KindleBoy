@@ -57,11 +57,14 @@ typedef struct emu_s {
 	 * a clean 0..3. */
 	uint8_t  lcd[GB_H][GB_W];
 
-	/* Dirty row-band since the last emu_frame_consumed(): rows in
-	 * [dirty_min_y, dirty_max_y] changed. When dirty_min_y > dirty_max_y the
-	 * frame is clean (nothing to present). */
+	/* Dirty rectangle since the last emu_frame_consumed(): rows in
+	 * [dirty_min_y, dirty_max_y] and columns in [dirty_min_x, dirty_max_x]
+	 * changed. When dirty_min_y > dirty_max_y the frame is clean. The column
+	 * band lets the caller refresh a narrower slice of e-ink (dialogs, HUDs). */
 	int      dirty_min_y;
 	int      dirty_max_y;
+	int      dirty_min_x;
+	int      dirty_max_x;
 
 	bool     sram_dirty;       /* cart RAM written since last flush */
 	bool     have_frame;       /* at least one frame rasterised since load */

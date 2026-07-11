@@ -13,7 +13,20 @@ static void add_zone(overlay_t *o, int x, int y, int w, int h,
 	if (o->count >= (int)(sizeof o->zones / sizeof o->zones[0])) return;
 	touch_zone_t *z = &o->zones[o->count++];
 	z->x = x; z->y = y; z->w = w; z->h = h;
-	z->bit = bit; z->special = special; z->label = label;
+	z->bit = bit; z->special = special; z->label = label; z->fixed_px = 0;
+}
+
+/* Largest text scale that fits `label` inside a w x h box (matches fit_px). */
+static int fit_px_wh(const char *label, int w, int h)
+{
+	int len = (int)strlen(label);
+	if (len == 0) return 1;
+	int px_w = (w - 6) / (8 * len);
+	int px_h = (h - 6) / 8;
+	int px = px_w < px_h ? px_w : px_h;
+	if (px < 1) px = 1;
+	if (px > 3) px = 3;
+	return px;
 }
 
 void overlay_layout(overlay_t *o, const render_cfg_t *rc, int fb_w, int fb_h)
@@ -65,12 +78,23 @@ void overlay_layout(overlay_t *o, const render_cfg_t *rc, int fb_w, int fb_h)
 
 	/* Bottom row: five compact buttons across the full width. */
 	int bw = (fb_w - 2 * pad - 4 * gap) / 5;
+	int first = o->count;
 	int x = pad;
-	add_zone(o, x, row_y, bw, row_h, JOYPAD_START,  OV_NONE, "START");  x += bw + gap;
-	add_zone(o, x, row_y, bw, row_h, JOYPAD_SELECT, OV_NONE, "SELECT"); x += bw + gap;
-	add_zone(o, x, row_y, bw, row_h, 0,             OV_MENU, "MENU");   x += bw + gap;
-	add_zone(o, x, row_y, bw, row_h, 0,             OV_SAVE, "SAVE");   x += bw + gap;
-	add_zone(o, x, row_y, bw, row_h, 0,             OV_FF,   "FF");
+	add_zone(o, x, row_y, bw, row_h, JOYPAD_START,  OV_NONE,    "START");   x += bw + gap;
+	add_zone(o, x, row_y, bw, row_h, JOYPAD_SELECT, OV_NONE,    "SELECT");  x += bw + gap;
+	add_zone(o, x, row_y, bw, row_h, 0,             OV_MENU,    "MENU");    x += bw + gap;
+	add_zone(o, x, row_y, bw, row_h, 0,             OV_DEGHOST, "DEGHOST"); x += bw + gap;
+	add_zone(o, x, row_y, bw, row_h, 0,             OV_FF,      "FF");
+
+	/* Give the whole bottom row one uniform text scale (the smallest that fits
+	 * the longest label) so they read as a matched set, not staggered sizes. */
+	int uni = 3;
+	for (int i = first; i < o->count; i++) {
+		int p = fit_px_wh(o->zones[i].label, o->zones[i].w, o->zones[i].h);
+		if (p < uni) uni = p;
+	}
+	for (int i = first; i < o->count; i++)
+		o->zones[i].fixed_px = uni;
 }
 
 /* Pick the largest text scale that fits inside the box, with margin. */
@@ -94,7 +118,7 @@ static void draw_zone(const touch_zone_t *z, uint8_t *canvas, int cw, int ch, bo
 	ui_fill(canvas, cw, ch, z->x, z->y, z->w, z->h, bg);
 	ui_rect(canvas, cw, ch, z->x, z->y, z->w, z->h, 0x00);
 	if (z->label && z->label[0]) {
-		int px = fit_px(z);
+		int px = z->fixed_px > 0 ? z->fixed_px : fit_px(z);
 		int tw = ui_text_width(z->label, px);
 		int th = 8 * px;
 		ui_text(canvas, cw, ch,
@@ -140,10 +164,10 @@ uint8_t overlay_map(const overlay_t *o, const plat_input_t *in, ov_specials_t *s
 			    py < z->y || py >= z->y + z->h)
 				continue;
 			switch (z->special) {
-			case OV_MENU: if (sp) sp->menu = true; break;
-			case OV_SAVE: if (sp) sp->save = true; break;
-			case OV_FF:   if (sp) sp->ff   = true; break;
-			default:      bits |= z->bit; break;
+			case OV_MENU:    if (sp) sp->menu = true; break;
+			case OV_DEGHOST: if (sp) sp->deghost = true; break;
+			case OV_FF:      if (sp) sp->ff   = true; break;
+			default:         bits |= z->bit; break;
 			}
 		}
 	}

@@ -25,7 +25,7 @@
 typedef enum {
 	OV_NONE = 0,   /* a plain joypad zone */
 	OV_MENU,       /* open the pause menu */
-	OV_SAVE,       /* quick save state */
+	OV_DEGHOST,    /* full-screen cleanup flash */
 	OV_FF          /* toggle fast-forward */
 } ov_special_t;
 
@@ -33,6 +33,7 @@ typedef struct {
 	int x, y, w, h;
 	uint8_t bit;             /* OR of JOYPAD_* bits (0 for specials) */
 	ov_special_t special;
+	int fixed_px;            /* >0: draw the label at this scale (0 = auto-fit) */
 	const char *label;
 } touch_zone_t;
 
@@ -45,7 +46,7 @@ typedef struct {
 /* Which special buttons are currently under a finger (level, not edge —
  * the app edge-detects so a held finger fires once). */
 typedef struct {
-	bool menu, save, ff;
+	bool menu, deghost, ff;
 } ov_specials_t;
 
 /* Compute zone rectangles from the game layout and framebuffer size. */

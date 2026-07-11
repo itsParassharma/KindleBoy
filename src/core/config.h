@@ -13,6 +13,9 @@
 typedef struct {
 	bool quality_mode;      /* false = A2 dithered (fast), true = GL16 4-gray */
 	int  autosave_sec;      /* battery-save flush cadence during play */
+	int  deghost_sec;       /* full cleanup-flash cadence during play (0 = never) */
+	int  idle_pause_sec;    /* auto-open the menu after this idle (0 = never) */
+	bool resume;            /* auto-load the save state when reopening a game */
 	char rom_dir[256];      /* directory the browser scans for *.gb */
 	char last_rom[256];     /* absolute path of the most recently played ROM */
 	int  scale_override;    /* 0 = auto integer scale, >0 = force this scale */

@@ -126,6 +126,10 @@ uint64_t plat_now_us(void) { return s_clock_us; }
 
 void plat_sleep_us(uint64_t us) { s_clock_us += us; }
 
+void plat_input_wait(int timeout_ms) { s_clock_us += (uint64_t)timeout_ms * 1000; }
+
+int plat_battery_percent(void) { return 77; }   /* fake, so snapshots show a value */
+
 void plat_log(const char *fmt, ...)
 {
 	va_list ap; va_start(ap, fmt);

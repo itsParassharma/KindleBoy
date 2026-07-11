@@ -27,8 +27,9 @@ typedef struct {
 /* Scan dir for ROMs (sorted). Returns the number found. */
 int  browser_scan(browser_t *b, const char *dir);
 
-/* Draw the list into the canvas. */
-void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch);
+/* Draw the list into the canvas. batt_pct (<0 to hide) and the clock are shown
+ * in the header so the status is visible on the game list too. */
+void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch, int batt_pct);
 
 #define BROWSER_QUIT (-2)   /* returned when the EXIT button is tapped */
 

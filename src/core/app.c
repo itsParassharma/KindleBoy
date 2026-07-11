@@ -23,6 +23,7 @@
 #include "emu.h"
 #include "render.h"
 #include "ui.h"
+#include "status.h"
 #include "overlay.h"
 #include "browser.h"
 #include "menu.h"
@@ -38,11 +39,13 @@
 #define PRESENT_QUALITY_US 450000     /* ~2.2 fps GL16 */
 #define QUIET_US           700000     /* still-scene threshold */
 #define A2_SOFT            120         /* A2 presents before a GL16 promo flashes */
-#define DEGHOST_FLASH_US   20000000ull /* full cleanup flash cadence during play */
 #define QUALITY_FLASH_EVERY 40         /* GL16 presents between GC16 flashes */
 #define BAND_SMALL_ROWS    48          /* <= this many GB rows => partial refresh */
 #define RESYNC_FRAMES      4           /* accumulator catch-up clamp */
 #define FF_EXTRA_FRAMES    2           /* fast-forward = 1 + this per tick (3x) */
+#define STATUS_REFRESH_US  30000000ull /* re-present the clock/battery strip */
+#define BATT_REFRESH_US    60000000ull /* re-read the battery level */
+#define AUTOSAVE_BACKSTOP_US 300000000ull /* force a battery flush if no quiet moment */
 
 typedef enum { APP_BROWSER, APP_PLAYING, APP_MENU, APP_EXIT } app_state_t;
 
@@ -73,10 +76,9 @@ static int      quality_present_count;
 static bool     promoted;
 static bool     du_after_promo;      /* purge promo grays with one DU sweep */
 
-/* fast-forward + quick-save state */
+/* fast-forward + deghost button state */
 static bool     ff_on;
-static bool     prev_save_touch, prev_ff_touch;
-static uint64_t save_feedback_until;
+static bool     prev_deghost_touch, prev_ff_touch;
 
 /* present-on-input: a fresh button press opens a short window during which we
  * present as soon as the panel is free instead of waiting out the rate limit,
@@ -84,11 +86,41 @@ static uint64_t save_feedback_until;
 static uint64_t boost_until_us;
 static uint8_t  prev_joypad_bits;
 
+/* status bar (clock + battery) */
+static int      status_h;
+static int      cached_batt = -1;
+static uint64_t last_batt_us;
+static uint64_t last_status_us;
+
+/* idle auto-pause */
+static uint64_t last_input_us;
+
 /* ---- helpers ------------------------------------------------------------- */
 
 static void present_full(plat_refresh_t mode)
 {
 	plat_present(0, 0, fbw, fbh, mode);
+}
+
+/* Re-read the battery no more than once a minute (the lipc/sysfs read isn't
+ * free). Call freely. */
+static void refresh_battery(uint64_t now)
+{
+	if (cached_batt < 0 || now - last_batt_us >= BATT_REFRESH_US) {
+		cached_batt = plat_battery_percent();
+		last_batt_us = now;
+	}
+}
+
+static void draw_status(void)
+{
+	bool low = cached_batt >= 0 && cached_batt <= 15;
+	status_draw(canvas, fbw, fbh, cached_batt, ff_on, low, false);
+}
+
+static void present_status(void)
+{
+	plat_present(0, 0, fbw, status_h, REFRESH_QUALITY);
 }
 
 /* First paint after entering the browser must be a full GC16 flash: on e-ink a
@@ -99,7 +131,7 @@ static bool browser_needs_flash = true;
 
 static void show_browser(void)
 {
-	browser_draw(&browser, canvas, fbw, fbh);
+	browser_draw(&browser, canvas, fbw, fbh, cached_batt);
 	/* First paint clears with a full flash; scroll/selection steps use the fast
 	 * B/W DU waveform (~230ms) instead of GL16 (~450ms) so navigation is snappy. */
 	present_full(browser_needs_flash ? REFRESH_FLASH : REFRESH_BW);
@@ -143,16 +175,22 @@ static void show_menu(void)
 static void repaint_play(void)
 {
 	int rx, ry, rw, rh;
+	uint64_t nowp = plat_now_us();
+	refresh_battery(nowp);
+
 	ui_fill(canvas, fbw, fbh, 0, 0, fbw, fbh, 0xFF);
+	draw_status();
 	render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, cfg->quality_mode,
 		    &rx, &ry, &rw, &rh);
 	overlay_draw(&overlay, canvas, fbw, fbh, ff_on);
 	present_full(REFRESH_FLASH);
 	plat_wait_refresh();
 
-	last_present_us = plat_now_us();
-	last_activity_us = last_present_us;
-	last_flash_us = last_present_us;
+	last_present_us = nowp;
+	last_activity_us = nowp;
+	last_flash_us = nowp;
+	last_status_us = nowp;
+	last_input_us = nowp;
 	a2_count = 0;
 	quality_present_count = 0;
 	promoted = false;
@@ -180,10 +218,14 @@ static bool enter_playing(int idx)
 	emu_loaded = true;
 	emu.gb.direct.frame_skip = true;   /* rasterise at 30 Hz, emulate at 60 Hz */
 
+	/* Resume where you left off: load the save state if one exists (ignored on
+	 * mismatch / absence). The .sav battery file is already loaded by emu_load. */
+	if (cfg->resume && emu_state_load(&emu) == EMU_OK)
+		plat_log("app: resumed from save state");
+
 	/* Fresh game, fresh control state. */
 	ff_on = false;
-	prev_save_touch = prev_ff_touch = false;
-	save_feedback_until = 0;
+	prev_deghost_touch = prev_ff_touch = false;
 	boost_until_us = 0;
 	prev_joypad_bits = 0;
 
@@ -213,14 +255,17 @@ static void play_present(uint64_t now)
 		if (!boosting && now - last_present_us < min_interval)
 			return;
 
-		/* Periodic full cleanup: a GC16 flash of the game area PLUS the
-		 * strip above it (where the Kindle clock likes to paint), so A2
-		 * residue and UI droppings never build up for long. */
-		if (!quality && now - last_flash_us >= DEGHOST_FLASH_US) {
+		/* Periodic full cleanup (configurable; 0 = never): a GC16 flash of the
+		 * game area PLUS the status strip above it, so A2 residue never builds
+		 * up for long and the clock/battery get refreshed for free. */
+		if (!quality && cfg->deghost_sec > 0 &&
+		    now - last_flash_us >= (uint64_t)cfg->deghost_sec * 1000000ull) {
+			draw_status();
 			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, false, &rx, &ry, &rw, &rh);
 			plat_present(0, 0, fbw, rcfg.dst_y + rcfg.game_h, REFRESH_FLASH);
 			a2_count = 0;
 			last_flash_us = now;
+			last_status_us = now;
 			du_after_promo = false;
 			emu_frame_consumed(&emu);
 			last_present_us = now;
@@ -239,11 +284,23 @@ static void play_present(uint64_t now)
 		}
 
 		int y0 = emu.dirty_min_y, y1 = emu.dirty_max_y;
+		int cx0 = emu.dirty_min_x, cx1 = emu.dirty_max_x;   /* capture before consume */
 		int band = y1 - y0 + 1;
 		if (band <= BAND_SMALL_ROWS)
 			render_game(&emu, &rcfg, canvas, fbw, y0, y1, quality, &rx, &ry, &rw, &rh);
 		else
 			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, quality, &rx, &ry, &rw, &rh);
+
+		/* Narrow the refresh to the columns that actually changed (dialogs,
+		 * HUD counters) — smaller e-ink updates complete faster and ghost less.
+		 * Rounded out to 8px; the canvas already holds the full rendered rows. */
+		if (cx0 <= cx1 && cx0 >= 0) {
+			int sx0 = (rcfg.dst_x + cx0 * rcfg.scale) & ~7;
+			int sx1 = (rcfg.dst_x + (cx1 + 1) * rcfg.scale + 7) & ~7;
+			if (sx0 < rcfg.dst_x) sx0 = rcfg.dst_x;
+			if (sx1 > rcfg.dst_x + rcfg.game_w) sx1 = rcfg.dst_x + rcfg.game_w;
+			rx = sx0; rw = sx1 - sx0;
+		}
 
 		plat_present(rx, ry, rw, rh, quality ? REFRESH_QUALITY : REFRESH_FAST);
 		emu_frame_consumed(&emu);
@@ -258,8 +315,16 @@ static void play_present(uint64_t now)
 			a2_count++;
 		}
 	} else {
-		/* Scene is quiescent: promote the FAST frame to a 4-gray GL16 still
-		 * once, which both deghosts and sharpens static text. */
+		/* Scene is quiescent — the ideal moment to flush a battery save,
+		 * since the fsync stall is hidden while nothing is animating. */
+		if (cfg->autosave_sec > 0 && emu.sram_dirty &&
+		    now - last_autosave_us >= (uint64_t)cfg->autosave_sec * 1000000ull) {
+			emu_sram_flush(&emu);
+			last_autosave_us = now;
+		}
+
+		/* Promote the FAST frame to a 4-gray GL16 still once, which both
+		 * deghosts and sharpens static text. */
 		if (!quality && !promoted && last_present_us &&
 		    now - last_activity_us >= QUIET_US) {
 			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, true, &rx, &ry, &rw, &rh);
@@ -338,8 +403,9 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 	fbw = info.fb_w;
 	fbh = info.fb_h;
 
+	status_h = status_height(fbw);
 	int min_overlay_h = fbh / 3;
-	render_layout(&rcfg, fbw, fbh, min_overlay_h);
+	render_layout(&rcfg, fbw, fbh, status_h, min_overlay_h);
 	if (cfg->scale_override > 0) {
 		int s = cfg->scale_override;
 		/* Reject an override that wouldn't fit — otherwise render_game would
@@ -360,6 +426,7 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 	ensure_dir("/mnt/us/roms/gb");
 	rescan_roms();
 	menu_reset(&menu);
+	refresh_battery(plat_now_us());   /* populate before the first screen paints */
 
 	if (autostart_rom && autostart_rom[0]) {
 		/* Boot straight into a ROM by path (desktop dev convenience). The
@@ -369,6 +436,11 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 		if (r == EMU_OK) {
 			emu_loaded = true;
 			emu.gb.direct.frame_skip = true;
+			if (cfg->resume) emu_state_load(&emu);
+			ff_on = false;
+			prev_deghost_touch = prev_ff_touch = false;
+			boost_until_us = 0;
+			prev_joypad_bits = 0;
 			strncpy(cfg->last_rom, autostart_rom, sizeof cfg->last_rom - 1);
 			repaint_play();
 			state = APP_PLAYING;
@@ -391,6 +463,7 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 		if (in.quit_requested) break;
 
 		if (state == APP_BROWSER) {
+			refresh_battery(plat_now_us());
 			bool changed = false;
 			int idx = browser_input(&browser, &in, fbw, fbh, &changed);
 			if (idx == BROWSER_QUIT) {
@@ -403,7 +476,7 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			} else if (changed) {
 				show_browser();
 			}
-			plat_sleep_us(30000);
+			plat_input_wait(500);   /* sleep until a touch, ~0 CPU while idle */
 			continue;
 		}
 
@@ -413,16 +486,30 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			if (act != MENU_NONE) handle_menu_action(act);
 			else if (changed) { menu_draw(&menu, canvas, fbw, fbh, cfg->quality_mode);
 					    present_full(REFRESH_BW); }   /* fast B/W step */
-			plat_sleep_us(30000);
+			plat_input_wait(500);
 			continue;
 		}
 
 		/* APP_PLAYING */
+		uint64_t now = plat_now_us();
+		refresh_battery(now);
+
 		ov_specials_t sp;
 		uint8_t joypad = overlay_map(&overlay, &in, &sp);
-		if (in.key_menu) sp.menu = true;
-		if (sp.menu) {
-			emu_sram_flush(&emu);       /* good moment: stall is hidden by the flash */
+
+		/* Any input resets the idle timer. */
+		if (in.count > 0 || joypad || in.key_menu ||
+		    in.key_up || in.key_down || in.key_enter)
+			last_input_us = now;
+
+		bool go_menu = sp.menu || in.key_menu;
+		if (cfg->idle_pause_sec > 0 &&
+		    now - last_input_us >= (uint64_t)cfg->idle_pause_sec * 1000000ull)
+			go_menu = true;   /* auto-pause: park on the menu to save power */
+
+		if (go_menu) {
+			emu_sram_flush(&emu);       /* stall hidden by the flash */
+			last_autosave_us = now;
 			menu_reset(&menu);
 			menu.touch_prev = true;     /* finger from this tap is still down */
 			state = APP_MENU;
@@ -431,40 +518,38 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			continue;
 		}
 
-		/* Quick save: one tap on SAVE writes the save state; the button
-		 * inverts briefly so you know it took. */
-		if (sp.save && !prev_save_touch) {
-			emu_sram_flush(&emu);
-			emu_state_save(&emu);
-			int bx, by, bw2, bh2;
-			overlay_draw_special(&overlay, canvas, fbw, fbh, OV_SAVE, true,
-					     &bx, &by, &bw2, &bh2);
-			plat_present(bx, by, bw2, bh2, REFRESH_BW);
-			save_feedback_until = plat_now_us() + 700000;
-		}
-		if (save_feedback_until && plat_now_us() >= save_feedback_until) {
-			int bx, by, bw2, bh2;
-			overlay_draw_special(&overlay, canvas, fbw, fbh, OV_SAVE, false,
-					     &bx, &by, &bw2, &bh2);
-			plat_present(bx, by, bw2, bh2, REFRESH_BW);
-			save_feedback_until = 0;
+		/* DEGHOST button: one tap does an immediate full-screen cleanup flash. */
+		if (sp.deghost && !prev_deghost_touch) {
+			int rx, ry, rw, rh;
+			draw_status();
+			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, false, &rx, &ry, &rw, &rh);
+			plat_present(0, 0, fbw, rcfg.dst_y + rcfg.game_h, REFRESH_FLASH);
+			last_flash_us = now;
+			last_status_us = now;
+			du_after_promo = false;
+			a2_count = 0;
+			emu_frame_consumed(&emu);
+			last_present_us = now;
 		}
 
-		/* Fast-forward: one tap toggles 3x speed; the button stays
-		 * inverted while it's on. */
+		/* Fast-forward: one tap toggles 3x speed; the button and the status-bar
+		 * marker invert while it's on. */
 		if (sp.ff && !prev_ff_touch) {
 			ff_on = !ff_on;
 			int bx, by, bw2, bh2;
 			overlay_draw_special(&overlay, canvas, fbw, fbh, OV_FF, ff_on,
 					     &bx, &by, &bw2, &bh2);
 			plat_present(bx, by, bw2, bh2, REFRESH_BW);
+			draw_status();
+			present_status();
+			last_status_us = now;
 		}
-		prev_save_touch = sp.save;
-		prev_ff_touch   = sp.ff;
+		prev_deghost_touch = sp.deghost;
+		prev_ff_touch      = sp.ff;
 
 		/* A newly-pressed button opens the present-ASAP window. */
 		if (joypad & ~prev_joypad_bits)
-			boost_until_us = plat_now_us() + INPUT_BOOST_US;
+			boost_until_us = now + INPUT_BOOST_US;
 		prev_joypad_bits = joypad;
 
 		emu_run_frame(&emu, joypad);
@@ -472,11 +557,21 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			for (int ff = 0; ff < FF_EXTRA_FRAMES; ff++)
 				emu_run_frame(&emu, joypad);
 
-		uint64_t now = plat_now_us();
+		now = plat_now_us();
 		play_present(now);
 
-		if (cfg->autosave_sec > 0 &&
-		    now - last_autosave_us >= (uint64_t)cfg->autosave_sec * 1000000ull) {
+		/* Keep the clock/battery strip current. */
+		if (now - last_status_us >= STATUS_REFRESH_US) {
+			draw_status();
+			present_status();
+			last_status_us = now;
+		}
+
+		/* Backstop: if we never hit a quiet moment, force a flush eventually so
+		 * progress is never left unsaved for long. */
+		if (cfg->autosave_sec > 0 && emu.sram_dirty &&
+		    now - last_autosave_us >=
+			(uint64_t)cfg->autosave_sec * 1000000ull + AUTOSAVE_BACKSTOP_US) {
 			emu_sram_flush(&emu);
 			last_autosave_us = now;
 		}

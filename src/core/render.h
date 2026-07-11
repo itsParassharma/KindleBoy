@@ -32,10 +32,10 @@ typedef struct {
 	int game_h;     /* scale*GB_H */
 } render_cfg_t;
 
-/* Choose the largest integer scale that fits the width and leaves at least
- * min_overlay_h pixels of height below the game for touch controls. Centers the
- * game horizontally with a small top margin. */
-void render_layout(render_cfg_t *cfg, int fb_w, int fb_h, int min_overlay_h);
+/* Choose the largest integer scale that fits the width and leaves top_reserve
+ * pixels above the game (for the status bar) plus at least min_overlay_h pixels
+ * below it (for touch controls). Centers the game horizontally. */
+void render_layout(render_cfg_t *cfg, int fb_w, int fb_h, int top_reserve, int min_overlay_h);
 
 /* Render GB rows [src_y0, src_y1] (inclusive) of e->lcd into canvas. When
  * quality is false, uses the Bayer dither; when true, the 4-gray map. Writes

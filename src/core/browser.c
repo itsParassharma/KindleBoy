@@ -3,6 +3,7 @@
  */
 #include "browser.h"
 #include "ui.h"
+#include "status.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,7 +85,7 @@ void browser_path(const browser_t *b, int idx, char *out, int n)
 	snprintf(out, n, "%s/%s", b->dir, b->names[idx]);
 }
 
-void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch)
+void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch, int batt_pct)
 {
 	geom_t g; compute_geom(cw, ch, &g);
 
@@ -95,6 +96,14 @@ void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch)
 	snprintf(title, sizeof title, "SELECT A ROM  (%d)", b->count);
 	ui_text(canvas, cw, ch, 8, g.px, title, g.px, 0x00);
 	ui_fill(canvas, cw, ch, 0, g.title_h - g.px, cw, g.px, 0x00);
+
+	/* Clock + battery, just left of the EXIT button. */
+	char sb[40], tb[16];
+	status_time_str(tb, sizeof tb, false);
+	if (batt_pct >= 0) snprintf(sb, sizeof sb, "%s  %d%%", tb, batt_pct);
+	else               snprintf(sb, sizeof sb, "%s", tb);
+	int sw = ui_text_width(sb, g.px);
+	ui_text(canvas, cw, ch, g.exit_x - sw - 10, g.px, sb, g.px, 0x00);
 
 	/* EXIT button, top-right. */
 	ui_rect(canvas, cw, ch, g.exit_x, 0, g.exit_w, g.title_h - g.px, 0x00);
