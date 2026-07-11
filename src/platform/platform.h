@@ -41,6 +41,7 @@ typedef enum {
 	REFRESH_FAST = 0,  /* A2   ~120ms 1-bit  — gameplay default            */
 	REFRESH_BW,        /* DU   ~250ms        — fallback / slower gameplay  */
 	REFRESH_QUALITY,   /* GL16 ~450ms 16-gray non-flashing — quality mode  */
+	REFRESH_GRAY4,     /* DU4  ~250ms 4-gray non-flashing — still promotion */
 	REFRESH_FLASH      /* GC16 ~550ms full flash — deghost / transitions   */
 } plat_refresh_t;
 

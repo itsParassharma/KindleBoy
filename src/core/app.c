@@ -6,11 +6,10 @@
  *   - The Game Boy always runs at its real 60 Hz (we keep time with a running
  *     accumulator). We only bother actually drawing the picture every other
  *     frame — the player can't tell, and it halves the work.
- *   - We only *send* the picture to the screen about 8 times a second (fast A2
- *     mode), or ~2 in QUALITY mode. plat_present() waits for the previous
- *     refresh to finish before it touches the buffer, so nothing tears — and
- *     because we already waited out the frame interval, that wait is usually
- *     instant.
+ *   - We only *send* the picture to the screen about 11 times a second (fast
+ *     A2 mode), or ~2 in QUALITY mode. Fast presents are fire-and-forget (the
+ *     e-ink controller sorts out overlapping updates itself); only quality and
+ *     flashing updates wait for a settled panel.
  *   - If nothing on screen changed, we don't refresh at all. And we only bother
  *     redrawing the strip of rows that did change if it's small.
  *   - Cleaning up e-ink ghosting is done by feel, not on a timer: when the
@@ -34,7 +33,7 @@
 
 /* ---- tuning constants ---------------------------------------------------- */
 #define GB_FRAME_US        16742      /* 59.73 Hz */
-#define PRESENT_FAST_US    112000     /* ~8.5 fps A2 (panel's real ceiling) */
+#define PRESENT_FAST_US    90000      /* ~11 fps A2 (submits don't wait on the panel) */
 #define INPUT_BOOST_US     150000     /* after a new button press, present ASAP for a bit */
 #define PRESENT_QUALITY_US 450000     /* ~2.2 fps GL16 */
 #define QUIET_US           700000     /* still-scene threshold */
@@ -323,8 +322,10 @@ static void play_present(uint64_t now)
 			last_autosave_us = now;
 		}
 
-		/* Promote the FAST frame to a 4-gray GL16 still once, which both
-		 * deghosts and sharpens static text. */
+		/* Promote the FAST frame to a proper 4-gray still once, which both
+		 * deghosts and sharpens static text. DU4 is made for exactly this:
+		 * 4 gray tones at DU speed with no flash, so the pause "blink" that
+		 * GL16 caused is gone. */
 		if (!quality && !promoted && last_present_us &&
 		    now - last_activity_us >= QUIET_US) {
 			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, true, &rx, &ry, &rw, &rh);
@@ -333,7 +334,7 @@ static void play_present(uint64_t now)
 				a2_count = 0;
 				last_flash_us = now;
 			} else {
-				plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_QUALITY);
+				plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_GRAY4);
 				a2_count /= 2;
 			}
 			promoted = true;

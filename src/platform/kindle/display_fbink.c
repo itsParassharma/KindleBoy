@@ -6,13 +6,14 @@
  * FBInk to write into the framebuffer (without refreshing yet), and then kick
  * off the actual e-ink refresh in whichever waveform mode was asked for.
  *
- * The one subtlety worth calling out: we wait for the *previous* refresh to
- * finish at the START of the next one, right before we touch the buffer. That
- * way we're never scribbling into memory the panel is still reading out (which
- * would tear), and we're never piling refreshes onto a busy panel. In practice
- * that wait is basically free, because the app already spaced its redraws out.
- * All single-threaded — it's a single-core chip, a display thread would just add
- * overhead.
+ * The one subtlety worth calling out: for fast partial updates (A2/DU/DU4) we
+ * do NOT wait for the previous refresh — the EPDC handles colliding updates
+ * itself, and the wait ioctl can block 150-500ms, which was most of our input
+ * lag. This is the same "push before the panel says ready" trick geekmaster's
+ * fast-video player and KOReader use. We only wait around the updates where a
+ * half-merged frame would actually look broken: before a quality (GL16) or
+ * flashing (GC16) refresh, and right after a flash. All single-threaded —
+ * it's a single-core chip, a display thread would just add overhead.
  */
 #include "../platform.h"
 #include "kindle_shared.h"
@@ -33,7 +34,8 @@ static kindle_disp_t s_disp;
 static FBInkConfig s_cfg_blit;   /* no_refresh: used for every raw blit */
 static FBInkConfig s_cfg_a2;     /* WFM_A2   — FAST */
 static FBInkConfig s_cfg_du;     /* WFM_DU   — B/W fallback */
-static FBInkConfig s_cfg_gl16;   /* WFM_GL16 — QUALITY / still promotion */
+static FBInkConfig s_cfg_du4;    /* WFM_DU4  — 4-gray still promotion, no flash */
+static FBInkConfig s_cfg_gl16;   /* WFM_GL16 — QUALITY */
 static FBInkConfig s_cfg_flash;  /* WFM_GC16 + flashing — deghost / transitions */
 
 static uint64_t s_last_refresh_us;
@@ -81,6 +83,7 @@ int plat_init(plat_info_t *out)
 
 	memset(&s_cfg_a2,   0, sizeof s_cfg_a2);   s_cfg_a2.is_quiet = true;   s_cfg_a2.wfm_mode   = WFM_A2;
 	memset(&s_cfg_du,   0, sizeof s_cfg_du);   s_cfg_du.is_quiet = true;   s_cfg_du.wfm_mode   = WFM_DU;
+	memset(&s_cfg_du4,  0, sizeof s_cfg_du4);  s_cfg_du4.is_quiet = true;  s_cfg_du4.wfm_mode  = WFM_DU4;
 	memset(&s_cfg_gl16, 0, sizeof s_cfg_gl16); s_cfg_gl16.is_quiet = true; s_cfg_gl16.wfm_mode = WFM_GL16;
 	memset(&s_cfg_flash,0, sizeof s_cfg_flash);s_cfg_flash.is_quiet = true;s_cfg_flash.wfm_mode= WFM_GC16;
 	s_cfg_flash.is_flashing = true;
@@ -112,6 +115,7 @@ static FBInkConfig *cfg_for(plat_refresh_t mode)
 	switch (mode) {
 	case REFRESH_FAST:    return &s_cfg_a2;
 	case REFRESH_BW:      return &s_cfg_du;
+	case REFRESH_GRAY4:   return &s_cfg_du4;
 	case REFRESH_QUALITY: return &s_cfg_gl16;
 	case REFRESH_FLASH:   return &s_cfg_flash;
 	default:              return &s_cfg_gl16;
@@ -122,8 +126,9 @@ static FBInkConfig *cfg_for(plat_refresh_t mode)
 static uint64_t wave_us(int mode)
 {
 	switch (mode) {
-	case REFRESH_FAST:    return 115000;   /* A2 is ~120ms; present() waits if it's still busy */
+	case REFRESH_FAST:    return 115000;   /* A2 is ~120ms */
 	case REFRESH_BW:      return 230000;
+	case REFRESH_GRAY4:   return 250000;
 	case REFRESH_QUALITY: return 450000;
 	case REFRESH_FLASH:   return 600000;
 	default:              return 450000;
@@ -139,8 +144,14 @@ void plat_present(int x, int y, int w, int h, plat_refresh_t mode)
 	if (y + h > s_h) h = s_h - y;
 	if (w <= 0 || h <= 0) return;
 
-	/* Wait for the previous refresh before touching the framebuffer. */
-	if (s_have_pending)
+	/* Only wait out the previous refresh when it actually matters: going
+	 * into a quality/flashing update (a half-merged flash looks broken), or
+	 * coming out of a flash (don't scribble mid-blink). Fast partials just
+	 * pile in — the EPDC resolves collisions, and skipping the wait ioctl
+	 * (which can block 150-500ms) is where most of the input lag went. */
+	bool must_wait = (mode == REFRESH_QUALITY || mode == REFRESH_FLASH ||
+			  s_last_mode == (int)REFRESH_FLASH);
+	if (s_have_pending && must_wait)
 		fbink_wait_for_complete(s_fbfd, LAST_MARKER);
 
 	/* Pack the sub-rect into a contiguous buffer (canvas rows are s_w-strided). */

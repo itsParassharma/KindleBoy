@@ -11,7 +11,7 @@
           "exitmenu": true
         },
         {
-          "name": "Play (stop Kindle UI - advanced)",
+          "name": "Play (max performance - stops Kindle UI)",
           "priority": 1,
           "action": "bin/run.sh",
           "params": "stopfw",

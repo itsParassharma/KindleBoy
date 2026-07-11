@@ -45,10 +45,24 @@ fi
 
 export KINDLEBOY_CFG="$EXT/kindleboy.cfg"
 
-# Keep the device awake and stop pillow (status bar / UI chrome) repainting
-# over the game while the Kindle UI stays alive underneath us.
+# Keep the device awake, and silence the system chrome. The pillow disable
+# only works on old firmware; since ~5.7.2 the titlebar clock is repainted by
+# the "awesome" window manager, so we freeze that process instead (KOReader's
+# trick) and thaw it on exit. volumd gets frozen too so plugging in USB can't
+# paint a dialog over the game. In stopfw mode the whole framework goes away,
+# so only volumd needs freezing there.
 lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>> "$LOG"
 lipc-set-prop com.lab126.pillow disableEnablePillow disable 2>> "$LOG"
+
+FROZE=""
+FREEZE_LIST="volumd"
+[ "$1" != "stopfw" ] && FREEZE_LIST="awesome volumd"
+for p in $FREEZE_LIST; do
+    if pidof "$p" >/dev/null 2>&1; then
+        killall -STOP "$p" 2>> "$LOG" && FROZE="$FROZE $p"
+    fi
+done
+[ -n "$FROZE" ] && echo "-- frozen:$FROZE --" >> "$LOG"
 
 # Pin the CPU to full speed while playing, restoring the original governor on
 # exit. Tolerant of devices that don't expose cpufreq (the writes just fail).
@@ -60,15 +74,27 @@ if [ -w "$GOV_PATH" ]; then
     echo "-- cpu governor: $OLD_GOV -> performance --" >> "$LOG"
 fi
 
+# Max-performance mode: take down the Java framework AND the background
+# services KOReader's launcher also stops, giving the emulator the whole CPU
+# and ~100MB of RAM back. Everything restarts on exit — no reboot needed, the
+# Kindle UI just takes ~20-30s to come back.
 STOPPED=""
+STOPPED_SVCS=""
+SERVICES="stored webreader kfxreader kfxview todo tmd rcm archive scanner otav3 otaupd"
 if [ "$1" = "stopfw" ]; then
-    echo "-- stopping UI (explicit stopfw mode) --" >> "$LOG"
+    echo "-- max performance: stopping UI + background services --" >> "$LOG"
+    trap "" TERM
     if initctl stop framework >> "$LOG" 2>&1; then
         STOPPED="framework"
     elif stop lab126_gui >> "$LOG" 2>&1; then
         STOPPED="lab126_gui"
     fi
-    sleep 2
+    usleep 1250000 2>/dev/null || sleep 2
+    trap - TERM
+    for job in $SERVICES; do
+        stop "$job" >> "$LOG" 2>&1 && STOPPED_SVCS="$STOPPED_SVCS $job"
+    done
+    echo "-- stopped:$STOPPED$STOPPED_SVCS --" >> "$LOG"
 fi
 
 echo "=== launching binary ===" >> "$LOG"
@@ -78,8 +104,17 @@ echo "=== binary exited, code=$? ===" >> "$LOG"
 # Restore the CPU governor.
 [ -n "$OLD_GOV" ] && echo "$OLD_GOV" > "$GOV_PATH" 2>> "$LOG"
 
+# Bring back everything we stopped or froze, services first so the framework
+# finds them running when it comes up.
+for job in $STOPPED_SVCS; do
+    start "$job" >> "$LOG" 2>&1
+done
 [ "$STOPPED" = "framework" ]  && initctl start framework >> "$LOG" 2>&1
 [ "$STOPPED" = "lab126_gui" ] && start lab126_gui >> "$LOG" 2>&1
+
+for p in $FROZE; do
+    killall -CONT "$p" 2>> "$LOG"
+done
 
 lipc-set-prop com.lab126.pillow disableEnablePillow enable 2>> "$LOG"
 lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>> "$LOG"

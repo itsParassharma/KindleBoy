@@ -49,6 +49,7 @@ See `LICENSE` and `NOTICE.md`.
 - Auto-pauses after a few idle minutes to save battery
 - Runs over the normal Kindle screen without touching your books or settings
 - Settings live in a plain text file you can edit
+- A max performance mode that pauses the Kindle system while you play
 - One binary that runs on 10th and 11th gen Kindles
 
 ---
@@ -110,15 +111,17 @@ stopped.
 - **Nothing happens on launch?** Check `/mnt/us/kindleboy.log`: everything the
   program does gets logged there.
 - **Won't run at all?** Probably the noexec thing. `run.sh` already copies to
-  `/var/tmp`, but if it still won't go, try the **Play (stop framework)** menu
+  `/var/tmp`, but if it still won't go, try the **Play (max performance)** menu
   item, which frees up the device more aggressively.
 - **Touch feels offset or mirrored?** The startup log prints the touch transform
   it picked up from FBInk plus the raw coordinate range. Grab those lines if you
   want to report it.
 - **Ghosting / smearing over time?** Open and close the menu (that forces a full
   screen cleanup), or hit **Deghost Now**. If it bugs you, switch to QUALITY mode.
-- **Feels sluggish?** FAST mode aims for ~8fps, which is about all A2 e-ink can
-  do. That's normal for this kind of screen.
+- **Feels sluggish?** FAST mode aims for ~11fps, which is close to what A2
+  e-ink can do. For the smoothest play, use **Play (max performance)**: it
+  pauses the whole Kindle system while you play and brings it back when you
+  quit (takes about half a minute to come back, no reboot needed).
 
 ---
 
