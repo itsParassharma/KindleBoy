@@ -1,0 +1,32 @@
+# secrets / local env — never commit
+.env
+*.env
+.env.*
+
+# build outputs
+build/
+*.o
+*.a
+*.exe
+
+# test artifacts
+test/*.pgm
+test/*.png
+test/*.exe
+test/*.st
+test/*.sav
+test/*.log
+test/sim.cfg
+
+# runtime-generated config/log at the repo root (NOT the sample in kual/)
+/kindleboy.cfg
+/kindleboy.log
+/gbemu.log
+
+# vendored FBInk source tree (cloned at build time, not committed)
+vendor/FBInk/
+
+# ROMs — never commit copyrighted ROMs
+*.gb
+*.gbc
+roms/

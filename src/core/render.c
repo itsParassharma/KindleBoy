@@ -1,0 +1,97 @@
+/*
+ * render.c — scale the GB frame up and dither it, in one pass over the pixels.
+ */
+#include "render.h"
+#include <string.h>
+
+/* 4-gray levels for QUALITY / GL16, indexed by DMG shade (0=white .. 3=black). */
+static const uint8_t gray4[4] = { 0xFF, 0xAA, 0x55, 0x00 };
+
+/* Black sub-pixel coverage per shade, out of 4 (2x2 Bayer cells).
+ * shade 0 (white)=0/4, 1 (light)=1/4, 2 (dark)=3/4, 3 (black)=4/4. */
+static const uint8_t black_level[4] = { 0, 1, 3, 4 };
+
+/* 2x2 Bayer threshold matrix. A cell is black iff bayer[dy&1][dx&1] < level. */
+static const uint8_t bayer2[2][2] = { { 0, 2 }, { 3, 1 } };
+
+/* Precomputed dither: dither_bw[shade][dy&1][dx&1] == 0x00 (black) or 0xFF. */
+static uint8_t dither_bw[4][2][2];
+static bool    dither_ready = false;
+
+static void build_dither(void)
+{
+	for (int s = 0; s < 4; s++)
+		for (int dy = 0; dy < 2; dy++)
+			for (int dx = 0; dx < 2; dx++)
+				dither_bw[s][dy][dx] =
+					(bayer2[dy][dx] < black_level[s]) ? 0x00 : 0xFF;
+	dither_ready = true;
+}
+
+void render_layout(render_cfg_t *cfg, int fb_w, int fb_h, int min_overlay_h)
+{
+	int s = fb_w / GB_W;
+	if (s < 1) s = 1;
+	/* Shrink until the game leaves room for the overlay below it. */
+	while (s > 1 && s * GB_H > fb_h - min_overlay_h)
+		s--;
+
+	cfg->scale  = s;
+	cfg->game_w = s * GB_W;
+	cfg->game_h = s * GB_H;
+	cfg->dst_x  = (fb_w - cfg->game_w) / 2;         /* center horizontally */
+	if (cfg->dst_x < 0) cfg->dst_x = 0;
+	cfg->dst_y  = 8;                                 /* small top margin */
+	if (cfg->dst_y + cfg->game_h > fb_h)
+		cfg->dst_y = 0;
+}
+
+void render_game(const emu_t *e, const render_cfg_t *cfg, uint8_t *canvas,
+		 int canvas_w, int src_y0, int src_y1, bool quality,
+		 int *out_x, int *out_y, int *out_w, int *out_h)
+{
+	if (!dither_ready) build_dither();
+
+	if (src_y0 < 0) src_y0 = 0;
+	if (src_y1 > GB_H - 1) src_y1 = GB_H - 1;
+	if (src_y1 < src_y0) { *out_x = cfg->dst_x; *out_y = cfg->dst_y; *out_w = 0; *out_h = 0; return; }
+
+	const int scale = cfg->scale;
+	const int ox = cfg->dst_x;
+	const int oy = cfg->dst_y;
+
+	for (int sy = src_y0; sy <= src_y1; sy++) {
+		const uint8_t *srow = e->lcd[sy];
+		for (int ry = 0; ry < scale; ry++) {
+			int dy = oy + sy * scale + ry;
+			uint8_t *drow = canvas + (size_t)dy * canvas_w + ox;
+			int dyp = dy & 1;
+
+			if (quality) {
+				/* Each source pixel -> scale identical cells. */
+				int dx = 0;
+				for (int sx = 0; sx < GB_W; sx++) {
+					uint8_t g = gray4[srow[sx] & 3];
+					for (int rx = 0; rx < scale; rx++)
+						drow[dx++] = g;
+				}
+			} else {
+				/* Screen-anchored Bayer: each cell keyed to its
+				 * absolute (dx,dy) parity for temporal stability. */
+				int dx = 0;
+				for (int sx = 0; sx < GB_W; sx++) {
+					const uint8_t (*d)[2] = dither_bw[srow[sx] & 3];
+					for (int rx = 0; rx < scale; rx++) {
+						int dxa = ox + dx;
+						drow[dx++] = d[dyp][dxa & 1];
+					}
+				}
+			}
+		}
+	}
+
+	*out_x = ox;
+	*out_y = oy + src_y0 * scale;
+	*out_w = cfg->game_w;
+	*out_h = (src_y1 - src_y0 + 1) * scale;
+}
