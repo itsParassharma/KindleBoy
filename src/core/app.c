@@ -248,9 +248,17 @@ static void play_present(uint64_t now)
 	if (dirty) {
 		last_activity_us = now;
 		promoted = false;
-		/* Honour the rate limit unless a recent button press is boosting us
-		 * and the panel is already free (never stall emulation on the panel). */
-		bool boosting = now < boost_until_us && !plat_refresh_busy();
+		/* Never submit while the panel is still physically refreshing the last
+		 * update: a fresh A2 update onto the same rect collides with the one in
+		 * flight, the controller re-drives pixels, and that shows up as flicker.
+		 * This is a pure clock check (no blocking ioctl), so emulation keeps
+		 * running at full speed — we just hold the picture back until the panel
+		 * has settled, roughly the panel's own ~8-9fps ceiling. */
+		if (plat_refresh_busy())
+			return;
+		/* Then honour the soft rate limit, unless a recent button press is
+		 * boosting us to get a touch on screen a beat sooner. */
+		bool boosting = now < boost_until_us;
 		if (!boosting && now - last_present_us < min_interval)
 			return;
 
@@ -322,11 +330,11 @@ static void play_present(uint64_t now)
 			last_autosave_us = now;
 		}
 
-		/* Promote the FAST frame to a proper 4-gray still once, which both
-		 * deghosts and sharpens static text. DU4 is made for exactly this:
-		 * 4 gray tones at DU speed with no flash, so the pause "blink" that
-		 * GL16 caused is gone. */
-		if (!quality && !promoted && last_present_us &&
+		/* Promote the FAST frame to a clean 4-gray still once, which both
+		 * deghosts and sharpens static text. GL16 is the known-good, non-flashing
+		 * waveform for this on every panel; only escalate to a full GC16 flash
+		 * once A2 residue has really piled up. */
+		if (!quality && !promoted && !plat_refresh_busy() && last_present_us &&
 		    now - last_activity_us >= QUIET_US) {
 			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, true, &rx, &ry, &rw, &rh);
 			if (a2_count >= A2_SOFT) {
@@ -334,7 +342,7 @@ static void play_present(uint64_t now)
 				a2_count = 0;
 				last_flash_us = now;
 			} else {
-				plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_GRAY4);
+				plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_QUALITY);
 				a2_count /= 2;
 			}
 			promoted = true;
