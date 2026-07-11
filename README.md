@@ -55,7 +55,23 @@ Everything *else* in the extension is ready to paste. The only missing piece is
 
 ---
 
-## Building it
+## Easiest: download a prebuilt binary
+
+You don't have to build anything. Every push is cross-compiled by GitHub Actions,
+and tagged releases carry a ready-to-copy extension folder:
+
+**https://github.com/itsParassharma/KindleBoy/releases**
+
+- Firmware 5.16.3 or newer (e.g. a 10th-gen on 5.17.1) → **`kindleboy-kindlehf.zip`**
+- Older firmware, or if the hf build won't launch → `kindleboy-kindlepw2.zip`
+
+Unzip it, drop the `kindleboy` folder into `extensions/` on the Kindle, put a
+`.gb` in `roms/gb/` (or in the extension folder — it searches both), and launch
+**KUAL → KindleBoy → Play**.
+
+The rest of this section is only if you want to build it yourself.
+
+## Building it yourself
 
 You need Linux. On Windows that means WSL:
 
