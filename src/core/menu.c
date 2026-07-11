@@ -8,17 +8,18 @@
 
 static const menu_action_t ITEM_ACTIONS[] = {
 	MENU_RESUME, MENU_SAVE_STATE, MENU_LOAD_STATE,
-	MENU_TOGGLE_QUALITY, MENU_DEGHOST, MENU_QUIT_TO_BROWSER, MENU_QUIT
+	MENU_TOGGLE_QUALITY, MENU_TOGGLE_AUDIO, MENU_DEGHOST, MENU_QUIT_TO_BROWSER, MENU_QUIT
 };
 #define ITEM_COUNT ((int)(sizeof ITEM_ACTIONS / sizeof ITEM_ACTIONS[0]))
 
-static void item_label(int i, bool quality_mode, char *out, int n)
+static void item_label(int i, bool quality_mode, bool audio_on, char *out, int n)
 {
 	switch (ITEM_ACTIONS[i]) {
 	case MENU_RESUME:          snprintf(out, n, "RESUME"); break;
 	case MENU_SAVE_STATE:      snprintf(out, n, "SAVE STATE"); break;
 	case MENU_LOAD_STATE:      snprintf(out, n, "LOAD STATE"); break;
 	case MENU_TOGGLE_QUALITY:  snprintf(out, n, "MODE: %s", quality_mode ? "QUALITY" : "FAST"); break;
+	case MENU_TOGGLE_AUDIO:    snprintf(out, n, "SOUND: %s", audio_on ? "ON" : "OFF"); break;
 	case MENU_DEGHOST:         snprintf(out, n, "DEGHOST NOW"); break;
 	case MENU_QUIT_TO_BROWSER: snprintf(out, n, "QUIT TO LIST"); break;
 	case MENU_QUIT:            snprintf(out, n, "EXIT EMULATOR"); break;
@@ -45,7 +46,7 @@ void menu_reset(menu_t *m)
 	m->touch_prev = false;
 }
 
-void menu_draw(const menu_t *m, uint8_t *canvas, int cw, int ch, bool quality_mode)
+void menu_draw(const menu_t *m, uint8_t *canvas, int cw, int ch, bool quality_mode, bool audio_on)
 {
 	int px, item_h, y0, panel_x, panel_w;
 	geom(cw, ch, &px, &item_h, &y0, &panel_x, &panel_w);
@@ -57,7 +58,7 @@ void menu_draw(const menu_t *m, uint8_t *canvas, int cw, int ch, bool quality_mo
 	for (int i = 0; i < ITEM_COUNT; i++) {
 		int iy = y0 + i * (item_h + gap);
 		char label[32];
-		item_label(i, quality_mode, label, sizeof label);
+		item_label(i, quality_mode, audio_on, label, sizeof label);
 		if (i == m->sel) {
 			ui_fill(canvas, cw, ch, panel_x, iy, panel_w, item_h, 0x00);
 			ui_text(canvas, cw, ch, panel_x + 12, iy + (item_h - 8 * px) / 2, label, px, 0xFF);

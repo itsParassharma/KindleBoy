@@ -17,7 +17,7 @@ CROSS_CC    = $(CROSS)-gcc
 FBINK_DIR   = vendor/FBInk
 FBINK_LIB   = $(FBINK_DIR)/Release/libfbink.a
 
-INCLUDES    = -Ivendor/walnut_cgb -Ivendor/peanut_gb -Isrc/core -Isrc/platform
+INCLUDES    = -Ivendor/walnut_cgb -Ivendor/peanut_gb -Ivendor/minigb_apu -Isrc/core -Isrc/platform
 WARN        = -Wall -Wextra
 STD         = -std=gnu11
 
@@ -26,12 +26,14 @@ CORE_SRC = \
 	src/main.c \
 	src/core/emu.c src/core/render.c src/core/ui.c src/core/status.c src/core/config.c \
 	src/core/overlay.c src/core/browser.c src/core/menu.c src/core/app.c \
-	src/core/peanut_impl.c
+	src/core/peanut_impl.c \
+	vendor/minigb_apu/minigb_apu.c
 
 KINDLE_SRC = $(CORE_SRC) \
 	src/platform/kindle/display_fbink.c \
 	src/platform/kindle/input_evdev.c \
-	src/platform/kindle/system_kindle.c
+	src/platform/kindle/system_kindle.c \
+	src/platform/kindle/audio_kindle.c
 
 DESKTOP_SRC = $(CORE_SRC) src/platform/desktop/platform_sdl.c
 
@@ -80,10 +82,10 @@ deploy: build/kindleboy
 # ---- test harnesses (native) ---------------------------------------------
 TEST_CORE = src/core/emu.c src/core/render.c src/core/ui.c src/core/status.c src/core/config.c \
 	src/core/overlay.c src/core/browser.c src/core/menu.c src/core/app.c \
-	src/core/peanut_impl.c
+	src/core/peanut_impl.c vendor/minigb_apu/minigb_apu.c
 
 headless: build/headless
-build/headless: test/headless.c src/core/emu.c src/core/render.c src/core/peanut_impl.c
+build/headless: test/headless.c src/core/emu.c src/core/render.c src/core/peanut_impl.c vendor/minigb_apu/minigb_apu.c
 	@mkdir -p build
 	$(CC) $(STD) -O2 $(WARN) $(INCLUDES) $^ -lm -o $@
 

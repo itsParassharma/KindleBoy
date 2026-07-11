@@ -130,6 +130,11 @@ void plat_input_wait(int timeout_ms) { s_clock_us += (uint64_t)timeout_ms * 1000
 
 int plat_battery_percent(void) { return 77; }   /* fake, so snapshots show a value */
 
+/* No audio in the headless sim. */
+bool plat_audio_open(const char *cmd, int rate, int channels) { (void)cmd; (void)rate; (void)channels; return false; }
+void plat_audio_write(const int16_t *samples, int n_samples)  { (void)samples; (void)n_samples; }
+void plat_audio_close(void) { }
+
 void plat_log(const char *fmt, ...)
 {
 	va_list ap; va_start(ap, fmt);

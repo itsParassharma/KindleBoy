@@ -101,6 +101,22 @@ void plat_input_wait(int timeout_ms);
 /* Current battery charge 0..100, or -1 if unknown. */
 int  plat_battery_percent(void);
 
+/* ---- audio (optional) ---------------------------------------------------- */
+/* Open a sink for signed-16 native-endian interleaved PCM at rate/channels.
+ * `cmd` is a platform hint: on Kindle it's the shell command to pipe raw PCM
+ * into (e.g. aplay); other backends may ignore it. Returns true when a sink is
+ * ready. On failure returns false and the app simply plays no sound — audio is
+ * always best-effort and never fatal. */
+bool plat_audio_open(const char *cmd, int rate, int channels);
+
+/* Queue n_samples int16 values (interleaved stereo, so 2 per frame) for output.
+ * Best-effort: may drop samples if the sink is backed up, so it never stalls
+ * emulation. No-op when no sink is open. */
+void plat_audio_write(const int16_t *samples, int n_samples);
+
+/* Close the audio sink. Safe to call when nothing is open. */
+void plat_audio_close(void);
+
 /* ---- timing / misc ------------------------------------------------------- */
 
 uint64_t plat_now_us(void);            /* monotonic microseconds */

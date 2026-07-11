@@ -110,4 +110,22 @@ int  emu_state_load(emu_t *e);
 /* Fill title (>=17 bytes) with the cartridge's internal title (NUL-terminated). */
 void emu_rom_title(emu_t *e, char title[17]);
 
+/* ---- optional audio ------------------------------------------------------ */
+/* The APU mirror is always kept current (cheap), but samples are only ever
+ * synthesised when the app calls emu_audio_gen(), which it does only while sound
+ * is enabled — so audio-off costs essentially nothing. Output is 32768 Hz,
+ * stereo, interleaved signed-16 native endian, one video-frame per gen call. */
+#define EMU_AUDIO_RATE      32768
+#define EMU_AUDIO_CHANNELS  2
+/* Max int16 samples emu_audio_gen() writes (AUDIO_SAMPLES_TOTAL ~= 1096). Sized
+ * generously so callers can stack-allocate without pulling in the APU header. */
+#define EMU_AUDIO_MAX_SAMPLES 1200
+
+/* Re-initialise the APU (called on load and state-load; safe to call anytime). */
+void emu_audio_reset(emu_t *e);
+
+/* Synthesise one video-frame of audio into buf (>= EMU_AUDIO_MAX_SAMPLES int16,
+ * interleaved stereo). Returns the number of int16 samples written. */
+int  emu_audio_gen(int16_t *buf);
+
 #endif /* EMU_H */

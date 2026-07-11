@@ -94,6 +94,9 @@ static uint64_t last_status_us;
 /* idle auto-pause */
 static uint64_t last_input_us;
 
+/* optional audio: is the output sink currently open */
+static bool     audio_open;
+
 /* ---- helpers ------------------------------------------------------------- */
 
 static void present_full(plat_refresh_t mode)
@@ -120,6 +123,20 @@ static void draw_status(void)
 static void present_status(void)
 {
 	plat_present(0, 0, fbw, status_h, REFRESH_QUALITY);
+}
+
+/* Open or close the audio sink to match cfg->audio. Cheap and idempotent; only
+ * called on entering play, on the menu toggle, and on leaving play. If opening
+ * fails (no player on the device, etc.) we just stay silent — audio never
+ * blocks or breaks anything. */
+static void audio_sync(void)
+{
+	if (cfg->audio && !audio_open)
+		audio_open = plat_audio_open(cfg->audio_cmd, EMU_AUDIO_RATE, EMU_AUDIO_CHANNELS);
+	else if (!cfg->audio && audio_open) {
+		plat_audio_close();
+		audio_open = false;
+	}
 }
 
 /* First paint after entering the browser must be a full GC16 flash: on e-ink a
@@ -164,7 +181,7 @@ static void rescan_roms(void)
 
 static void show_menu(void)
 {
-	menu_draw(&menu, canvas, fbw, fbh, cfg->quality_mode);
+	menu_draw(&menu, canvas, fbw, fbh, cfg->quality_mode, cfg->audio);
 	present_full(REFRESH_FLASH);   /* flash doubles as a deghost */
 	plat_wait_refresh();
 }
@@ -231,6 +248,8 @@ static bool enter_playing(int idx)
 	/* Remember for next launch. */
 	strncpy(cfg->last_rom, path, sizeof cfg->last_rom - 1);
 	config_save(cfg, cfg_path);
+
+	audio_sync();   /* open the sound pipe if audio is enabled */
 
 	repaint_play();
 	state = APP_PLAYING;
@@ -375,6 +394,12 @@ static void handle_menu_action(menu_action_t act)
 		config_save(cfg, cfg_path);
 		show_menu();
 		break;
+	case MENU_TOGGLE_AUDIO:
+		cfg->audio = !cfg->audio;
+		config_save(cfg, cfg_path);
+		audio_sync();     /* open/close the sink to match, right away */
+		show_menu();      /* redraw so the SOUND: label updates */
+		break;
 	case MENU_DEGHOST:
 		state = APP_PLAYING;
 		repaint_play();
@@ -383,6 +408,7 @@ static void handle_menu_action(menu_action_t act)
 		emu_sram_flush(&emu);
 		emu_unload(&emu);
 		emu_loaded = false;
+		plat_audio_close(); audio_open = false; /* silence when leaving the game */
 		rescan_roms();                          /* refresh list */
 		browser.touch_prev = true;              /* finger from this tap is still down */
 		browser_needs_flash = true;             /* clear the game off the panel */
@@ -493,7 +519,7 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			bool changed = false;
 			menu_action_t act = menu_input(&menu, &in, fbw, fbh, &changed);
 			if (act != MENU_NONE) handle_menu_action(act);
-			else if (changed) { menu_draw(&menu, canvas, fbw, fbh, cfg->quality_mode);
+			else if (changed) { menu_draw(&menu, canvas, fbw, fbh, cfg->quality_mode, cfg->audio);
 					    present_full(REFRESH_BW); }   /* fast B/W step */
 			plat_input_wait(500);
 			continue;
@@ -562,9 +588,16 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 		prev_joypad_bits = joypad;
 
 		emu_run_frame(&emu, joypad);
-		if (ff_on)
+		if (ff_on) {
 			for (int ff = 0; ff < FF_EXTRA_FRAMES; ff++)
 				emu_run_frame(&emu, joypad);
+		} else if (audio_open) {
+			/* One video-frame of sound per emulated frame at normal speed.
+			 * Muted during fast-forward (3x would just be noise). */
+			int16_t abuf[EMU_AUDIO_MAX_SAMPLES];
+			int n = emu_audio_gen(abuf);
+			plat_audio_write(abuf, n);
+		}
 
 		now = plat_now_us();
 		play_present(now);
@@ -598,6 +631,7 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 		emu_sram_flush(&emu);
 		emu_unload(&emu);
 	}
+	plat_audio_close();
 	config_save(cfg, cfg_path);
 	plat_shutdown();
 	return 0;

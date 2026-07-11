@@ -50,6 +50,7 @@ See `LICENSE` and `NOTICE.md`.
 - Clock and battery level shown at the top of the screen
 - A deghost button, plus automatic cleanup, to stop the e-ink smearing over time
 - Auto-pauses after a few idle minutes to save battery
+- Optional game sound over Bluetooth headphones (off by default)
 - Runs over the normal Kindle screen without touching your books or settings
 - Settings live in a plain text file you can edit
 - A max performance mode that pauses the Kindle system while you play
@@ -116,6 +117,20 @@ DEGHOST wipes any e-ink smearing straight away. FF runs the game at 3x, handy
 for grinding through dialog. Your progress saves on its own (`game.sav` for the
 in-game save, `game.st` for save states), and reopening a game resumes where you
 stopped.
+
+## Sound (optional)
+
+Sound is off by default, because it costs a bit of CPU and battery and most
+people won't use it. Turn it on from the pause menu (SOUND: ON) or set `audio=1`
+in `kindleboy.cfg`.
+
+A few things to know. The Kindle has no speaker, so sound only plays through
+**Bluetooth** headphones or a Bluetooth speaker you've paired in the Kindle's
+settings. It also needs the normal Kindle system running, so it won't work in
+"max performance" mode (that mode shuts the system down for speed). If you turn
+sound on and hear nothing, your Kindle may use a different audio player than the
+default; point `audio_cmd` in `kindleboy.cfg` at whatever it has. When in doubt,
+leave sound off and nothing changes.
 
 ---
 

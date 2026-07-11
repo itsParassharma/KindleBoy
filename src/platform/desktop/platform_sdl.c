@@ -40,7 +40,7 @@ int plat_init(plat_info_t *out)
 	if (fb) { int w, h; if (sscanf(fb, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) { s_w = w; s_h = h; } }
 	s_eink_preview = getenv("KINDLEBOY_EINK") != NULL;
 
-	if (SDL_Init(SDL_INIT_VIDEO) != 0) { fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return -1; }
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) { fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return -1; }
 	s_win = SDL_CreateWindow("KindleBoy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 				 s_w, s_h, SDL_WINDOW_SHOWN);
 	if (!s_win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return -1; }
@@ -159,6 +159,40 @@ void plat_input_wait(int timeout_ms)
 }
 
 int plat_battery_percent(void) { return 77; }   /* fake on desktop, to exercise the UI */
+
+/* ---- audio: real SDL output so the whole path is testable by ear ---------- */
+static SDL_AudioDeviceID s_audio;
+
+bool plat_audio_open(const char *cmd, int rate, int channels)
+{
+	(void)cmd;   /* the pipe command is a Kindle concept; desktop uses SDL directly */
+	if (s_audio) return true;
+	SDL_AudioSpec want, have;
+	SDL_memset(&want, 0, sizeof want);
+	want.freq     = rate;
+	want.format   = AUDIO_S16SYS;
+	want.channels = (Uint8)channels;
+	want.samples  = 1024;
+	want.callback = NULL;   /* we push with SDL_QueueAudio */
+	s_audio = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+	if (!s_audio) { fprintf(stderr, "audio: SDL_OpenAudioDevice: %s\n", SDL_GetError()); return false; }
+	SDL_PauseAudioDevice(s_audio, 0);
+	return true;
+}
+
+void plat_audio_write(const int16_t *samples, int n_samples)
+{
+	if (!s_audio || n_samples <= 0) return;
+	/* Cap the queue so running ahead of real time can't build unbounded lag. */
+	if (SDL_GetQueuedAudioSize(s_audio) > (Uint32)(EMU_AUDIO_RATE * 2 * sizeof(int16_t)))
+		return;   /* ~1s buffered already: drop this frame */
+	SDL_QueueAudio(s_audio, samples, (Uint32)((size_t)n_samples * sizeof(int16_t)));
+}
+
+void plat_audio_close(void)
+{
+	if (s_audio) { SDL_CloseAudioDevice(s_audio); s_audio = 0; }
+}
 
 void plat_log(const char *fmt, ...)
 {

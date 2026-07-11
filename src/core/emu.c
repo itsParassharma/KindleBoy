@@ -5,6 +5,7 @@
  */
 #include "emu.h"
 #include "../platform/platform.h"
+#include "minigb_apu.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,24 @@
  * buffer is sufficient. in_frame guards against firing outside a frame run. */
 static jmp_buf s_frame_jmp;
 static volatile bool s_in_frame = false;
+
+/* ---- audio (optional) ---------------------------------------------------- */
+/* One APU for the single GB instance. With ENABLE_SOUND, the core calls the two
+ * globals below on every APU-register access to keep this mirror current — cheap
+ * bookkeeping. The expensive part, synthesising samples, only happens when the
+ * app actually asks via emu_audio_gen(), which it does only when sound is on. */
+static struct minigb_apu_ctx s_apu;
+
+uint8_t audio_read(uint16_t addr)             { return minigb_apu_audio_read(&s_apu, addr); }
+void    audio_write(uint16_t addr, uint8_t v) { minigb_apu_audio_write(&s_apu, addr, v); }
+
+void emu_audio_reset(emu_t *e)  { (void)e; minigb_apu_audio_init(&s_apu); }
+
+int emu_audio_gen(int16_t *buf) /* fills EMU_AUDIO_SAMPLES stereo int16, one frame */
+{
+	minigb_apu_audio_callback(&s_apu, buf);
+	return AUDIO_SAMPLES_TOTAL;
+}
 
 /* ---- core callbacks ------------------------------------------------------ */
 
@@ -250,6 +269,7 @@ int emu_load(emu_t *e, const char *rom_path)
 					  cart_ram_write_cb, error_cb, e);
 	if (ie != GB_INIT_NO_ERROR) { plat_log("emu: gb_init err %d", ie); emu_unload(e); return EMU_ERR_INIT; }
 	bind_callbacks(e);
+	emu_audio_reset(e);
 
 	/* Allocate battery RAM and load the .sav if present. */
 	size_t ram = 0;
@@ -402,6 +422,7 @@ int emu_state_load(emu_t *e)
 
 	/* Saved pointer values are meaningless in this process — re-bind. */
 	bind_callbacks(e);
+	emu_audio_reset(e);               /* APU isn't in the saved struct; re-init */
 	e->gb.direct.frame_skip = true;   /* gb_init_lcd cleared it; restore policy */
 	e->dirty_min_y = 0;               /* force a full repaint of the restored frame */
 	e->dirty_max_y = GB_H - 1;

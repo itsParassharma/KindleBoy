@@ -11,8 +11,15 @@
  * (The filename stays peanut_impl.c out of habit / to avoid churn; Walnut-CGB
  * is a direct descendant of Peanut-GB and keeps the same API.)
  */
-#define ENABLE_SOUND 0                  /* the Kindle has nothing to play sound with */
+#define ENABLE_SOUND 1                  /* optional sound; gated at runtime (see emu.c) */
 #define ENABLE_LCD   1
 #define WALNUT_GB_HIGH_LCD_ACCURACY 1   /* the CPU can easily afford it */
+
+/* With ENABLE_SOUND the core calls these two externals on APU register access;
+ * they're defined in emu.c and forward to the minigb_apu instance. Declared here
+ * so the core implementation compiles. */
+#include <stdint.h>
+uint8_t audio_read(uint16_t addr);
+void    audio_write(uint16_t addr, uint8_t val);
 
 #include "walnut_cgb.h"
