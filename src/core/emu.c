@@ -21,9 +21,9 @@
 #  define emu_fsync(fd) fsync(fd)
 #endif
 
-#define MAX_ROM_BYTES (8u * 1024u * 1024u)   /* largest DMG cart is 8 MiB */
+#define MAX_ROM_BYTES (8u * 1024u * 1024u)   /* largest cart is 8 MiB */
 #define STATE_MAGIC   0x54534247u            /* "GBST" little-endian */
-#define STATE_VERSION 1u
+#define STATE_VERSION 2u                     /* 2: Walnut-CGB struct (was Peanut-GB) */
 
 /* Peanut-GB's gb_error() must not return (doing so is documented as SIGABRT).
  * We recover by longjmp-ing back to emu_run_frame, which set this buffer before
@@ -32,7 +32,7 @@
 static jmp_buf s_frame_jmp;
 static volatile bool s_in_frame = false;
 
-/* ---- Peanut-GB callbacks ------------------------------------------------- */
+/* ---- core callbacks ------------------------------------------------------ */
 
 static uint8_t rom_read_cb(struct gb_s *gb, const uint_fast32_t addr)
 {
@@ -40,6 +40,36 @@ static uint8_t rom_read_cb(struct gb_s *gb, const uint_fast32_t addr)
 	if (addr < e->rom_size)
 		return e->rom[addr];
 	return 0xFF;
+}
+
+/* Walnut-CGB's dual-fetch path reads 2 and 4 bytes at a time. ROM on disk is
+ * little-endian and both our targets (ARM Kindle, x86 desktop) are too, so a
+ * memcpy of the raw bytes gives the right value; memcpy also sidesteps
+ * alignment/strict-aliasing UB. Out-of-range tails fall back to byte reads. */
+static uint16_t rom_read16_cb(struct gb_s *gb, const uint_fast32_t addr)
+{
+	emu_t *e = gb->direct.priv;
+	if (addr + 1 < e->rom_size) {
+		uint16_t v;
+		memcpy(&v, e->rom + addr, sizeof v);
+		return v;
+	}
+	return (uint16_t)rom_read_cb(gb, addr) |
+	       ((uint16_t)rom_read_cb(gb, addr + 1) << 8);
+}
+
+static uint32_t rom_read32_cb(struct gb_s *gb, const uint_fast32_t addr)
+{
+	emu_t *e = gb->direct.priv;
+	if (addr + 3 < e->rom_size) {
+		uint32_t v;
+		memcpy(&v, e->rom + addr, sizeof v);
+		return v;
+	}
+	return (uint32_t)rom_read_cb(gb, addr) |
+	       ((uint32_t)rom_read_cb(gb, addr + 1) << 8) |
+	       ((uint32_t)rom_read_cb(gb, addr + 2) << 16) |
+	       ((uint32_t)rom_read_cb(gb, addr + 3) << 24);
 }
 
 static uint8_t cart_ram_read_cb(struct gb_s *gb, const uint_fast32_t addr)
@@ -74,9 +104,34 @@ static void error_cb(struct gb_s *gb, const enum gb_error_e err,
 	abort();
 }
 
-/* Capture one rasterised scanline. pixels[x] bits 1-0 are the 2-bit DMG shade;
- * upper bits carry the CGB palette hint, which we discard for grayscale. Only
- * rows that actually changed widen the dirty band. */
+/* Four fixed grays for DMG shades 0..3 (white..black). These are the exact
+ * values the renderer used to hardcode, so DMG output is unchanged. */
+static const uint8_t dmg_luma[4] = { 0xFF, 0xAA, 0x55, 0x00 };
+
+/* CGB colour -> luma. fixPalette[] holds up to 64 RGB565 (big-endian on the
+ * native panel path, but we only need relative luma) entries; the pixel byte is
+ * a 6-bit index into it. Recomputed once per frame (at line 0) since the palette
+ * can change between frames but not within one. Rec.601-ish weights. */
+static uint8_t s_cgb_luma[64];
+
+static void rebuild_cgb_luma(struct gb_s *gb)
+{
+	for (int i = 0; i < 64; i++) {
+		uint16_t c = gb->cgb.fixPalette[i];
+		/* fixPalette is stored as RGB565 (byte-swapped for the LCD); undo the
+		 * swap, then expand each channel to 8 bits. */
+		uint16_t v = (uint16_t)((c >> 8) | (c << 8));
+		int r = ((v >> 11) & 0x1F) << 3;
+		int g = ((v >> 5)  & 0x3F) << 2;
+		int b = ( v        & 0x1F) << 3;
+		s_cgb_luma[i] = (uint8_t)((77 * r + 151 * g + 28 * b) >> 8);
+	}
+}
+
+/* Capture one rasterised scanline as 8-bit luma. In DMG mode pixels[x] bits 1-0
+ * are the shade (upper bits are a palette hint we don't need for gray); in CGB
+ * mode the low 6 bits index the colour palette. Only rows that actually changed
+ * widen the dirty band. */
 static void lcd_line_cb(struct gb_s *gb, const uint8_t *pixels,
 			const uint_fast8_t line)
 {
@@ -86,8 +141,14 @@ static void lcd_line_cb(struct gb_s *gb, const uint8_t *pixels,
 
 	if (line >= GB_H) return;   /* header doc says 0-144 incl.; array is 0-143 */
 
-	for (x = 0; x < GB_W; x++)
-		row[x] = pixels[x] & 0x03;
+	if (gb->cgb.cgbMode) {
+		if (line == 0) rebuild_cgb_luma(gb);
+		for (x = 0; x < GB_W; x++)
+			row[x] = s_cgb_luma[pixels[x] & 0x3F];
+	} else {
+		for (x = 0; x < GB_W; x++)
+			row[x] = dmg_luma[pixels[x] & 0x03];
+	}
 
 	if (memcmp(row, e->lcd[line], GB_W) != 0) {
 		int first = 0, last = GB_W - 1;
@@ -107,10 +168,12 @@ static void lcd_line_cb(struct gb_s *gb, const uint8_t *pixels,
  * struct, including these pointers, with meaningless saved values). */
 static void bind_callbacks(emu_t *e)
 {
-	e->gb.gb_rom_read      = rom_read_cb;
-	e->gb.gb_cart_ram_read = cart_ram_read_cb;
-	e->gb.gb_cart_ram_write= cart_ram_write_cb;
-	e->gb.gb_error         = error_cb;
+	e->gb.gb_rom_read       = rom_read_cb;
+	e->gb.gb_rom_read_16bit = rom_read16_cb;
+	e->gb.gb_rom_read_32bit = rom_read32_cb;
+	e->gb.gb_cart_ram_read  = cart_ram_read_cb;
+	e->gb.gb_cart_ram_write = cart_ram_write_cb;
+	e->gb.gb_error          = error_cb;
 	/* We use neither serial nor a boot ROM; NULL these so a restored state
 	 * file can never leave an arbitrary pointer here for Peanut-GB to call. */
 	e->gb.gb_serial_tx     = NULL;
@@ -179,10 +242,11 @@ int emu_load(emu_t *e, const char *rom_path)
 	fclose(f);
 	e->rom_size = (size_t)sz;
 
-	/* Init Peanut-GB (needs rom_read to inspect the header). */
+	/* Init the core (needs rom_read to inspect the header). */
 	e->gb.direct.priv = e;
 	e->gb.gb_rom_read = rom_read_cb;   /* gb_init reads header via this */
-	enum gb_init_error_e ie = gb_init(&e->gb, rom_read_cb, cart_ram_read_cb,
+	enum gb_init_error_e ie = gb_init(&e->gb, rom_read_cb, rom_read16_cb,
+					  rom_read32_cb, cart_ram_read_cb,
 					  cart_ram_write_cb, error_cb, e);
 	if (ie != GB_INIT_NO_ERROR) { plat_log("emu: gb_init err %d", ie); emu_unload(e); return EMU_ERR_INIT; }
 	bind_callbacks(e);

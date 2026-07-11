@@ -17,7 +17,7 @@ CROSS_CC    = $(CROSS)-gcc
 FBINK_DIR   = vendor/FBInk
 FBINK_LIB   = $(FBINK_DIR)/Release/libfbink.a
 
-INCLUDES    = -Ivendor/peanut_gb -Isrc/core -Isrc/platform
+INCLUDES    = -Ivendor/walnut_cgb -Ivendor/peanut_gb -Isrc/core -Isrc/platform
 WARN        = -Wall -Wextra
 STD         = -std=gnu11
 

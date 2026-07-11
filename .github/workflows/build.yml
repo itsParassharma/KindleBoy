@@ -2,9 +2,9 @@ name: build-kindle
 
 # Cross-compiles the Kindle binary in the cloud and uploads a ready-to-copy
 # extension folder as an artifact — so you don't need a local Linux toolchain.
-# Builds two variants: kindlehf (for firmware >= 5.16.3, e.g. 5.17.1) and
-# kindlepw2 (older / widest compatibility). Grab the one that matches, or try
-# both if unsure.
+# Builds three variants: kindlehf (firmware >= 5.16.3, e.g. 5.17.1), kindlepw2
+# (Paperwhite 2 through 10th gen / widest compatibility), and kindle5 (the older
+# Kindle Touch 5th gen and Paperwhite 1). Grab the one that matches your device.
 
 on:
   push:
@@ -24,6 +24,9 @@ jobs:
           - target: kindlepw2
             triple: arm-kindlepw2-linux-gnueabi
             tarball: kindlepw2.tar.gz
+          - target: kindle5
+            triple: arm-kindle5-linux-gnueabi
+            tarball: kindle5.tar.gz
     steps:
       - uses: actions/checkout@v4
 

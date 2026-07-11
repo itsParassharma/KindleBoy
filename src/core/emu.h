@@ -1,16 +1,19 @@
 /*
- * emu.h — our wrapper around Peanut-GB.
+ * emu.h — our wrapper around the Game Boy core (Walnut-CGB).
  *
  * Holds one running Game Boy: the ROM (loaded whole into RAM), the cartridge's
- * battery-backed save RAM, and the latest 160x144 frame at 2 bits per pixel.
- * Peanut-GB hands us the picture one scanline at a time via a callback. We stash
- * each line and, by diffing it against what was there before, remember the range
- * of rows that actually changed since we last drew — the "dirty band". That's
- * the entire dirty-rectangle scheme, and row-level is all e-ink cares about
- * anyway (a refresh costs about the same whether it covers a line or a strip).
+ * battery-backed save RAM, and the latest 160x144 frame at one gray byte per
+ * pixel. The core hands us the picture one scanline at a time via a callback.
+ * We convert each pixel to 8-bit luma (DMG shades and CGB colours both collapse
+ * to gray for e-ink), stash the line, and by diffing it against what was there
+ * before, remember the range of rows that actually changed since we last drew —
+ * the "dirty band". That's the entire dirty-rectangle scheme, and row-level is
+ * all e-ink cares about anyway (a refresh costs about the same whether it covers
+ * a line or a strip).
  *
- * Peanut-GB's build knobs live in peanut_impl.c: no sound (the Kindle has no
- * speaker), LCD on, high accuracy (the CPU has cycles to spare).
+ * The core is Walnut-CGB, a CGB-capable rewrite of Peanut-GB with the same API.
+ * Its build knobs live in peanut_impl.c: no sound (the Kindle has no speaker),
+ * LCD on, high accuracy (the CPU has cycles to spare).
  */
 #ifndef EMU_H
 #define EMU_H
@@ -19,16 +22,16 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* peanut_gb.h is a single-header library: struct gb_s and all function
+/* walnut_cgb.h is a single-header library: struct gb_s and all function
  * prototypes are always emitted, but the implementation is guarded by
- * PEANUT_GB_HEADER_ONLY. Every TU that includes emu.h gets declarations only;
+ * WALNUT_GB_HEADER_ONLY. Every TU that includes emu.h gets declarations only;
  * the sole file that instantiates the implementation is peanut_impl.c. The
- * config macros (ENABLE_SOUND/ENABLE_LCD/HIGH_LCD_ACCURACY) do not affect the
- * layout of struct gb_s, so this split is ABI-safe. */
-#ifndef PEANUT_GB_HEADER_ONLY
-#define PEANUT_GB_HEADER_ONLY
+ * config macros (ENABLE_SOUND/ENABLE_LCD/WALNUT_GB_HIGH_LCD_ACCURACY) do not
+ * affect the layout of struct gb_s, so this split is ABI-safe. */
+#ifndef WALNUT_GB_HEADER_ONLY
+#define WALNUT_GB_HEADER_ONLY
 #endif
-#include "peanut_gb.h"
+#include "walnut_cgb.h"
 
 #define GB_W 160
 #define GB_H 144
@@ -52,9 +55,10 @@ typedef struct emu_s {
 	uint8_t *cart_ram;         /* battery-backed SRAM (may be NULL / size 0) */
 	size_t   cart_ram_size;
 
-	/* Latest rasterised frame: 2-bit DMG shade per pixel (0..3) in bits 1-0.
-	 * Upper bits (palette) are masked out on capture so downstream code sees
-	 * a clean 0..3. */
+	/* Latest rasterised frame: one 8-bit gray (luma) value per pixel, 0x00
+	 * black .. 0xFF white. DMG shades map to four fixed grays; CGB colours are
+	 * converted to luma. The renderer dithers/quantises this straight to the
+	 * panel, so downstream code never needs to know DMG from CGB. */
 	uint8_t  lcd[GB_H][GB_W];
 
 	/* Dirty rectangle since the last emu_frame_consumed(): rows in

@@ -1,9 +1,13 @@
 # KindleBoy
 
-A Game Boy emulator for a jailbroken Kindle. It plays real `.gb` games on the
-e-ink screen, lets you pick a game from a list right on the device, and draws
-touch buttons on screen so you can actually play. It saves your battery saves
-and has save states too.
+A Game Boy emulator for a jailbroken Kindle. It plays real `.gb` and `.gbc`
+games on the e-ink screen, lets you pick a game from a list right on the device,
+and draws touch buttons on screen so you can actually play. It saves your
+battery saves and has save states too.
+
+Color (Game Boy Color) games run too, shown in grayscale since e-ink has no
+colour. Original Game Boy games look the sharpest; colour games with lots of
+mid-tones look better in QUALITY mode than in the fast dithered one.
 
 Built for the **Kindle Basic, 10th/11th gen** (the cheap touch ones) running
 KUAL. There's also a desktop build so you can develop and test it without
@@ -34,7 +38,8 @@ See `LICENSE` and `NOTICE.md`.
 
 ## Features
 
-- Plays real Game Boy games (`.gb` files you own)
+- Plays real Game Boy and Game Boy Color games (`.gb` / `.gbc` files you own)
+- Colour games play in grayscale (e-ink has no colour)
 - Pick a game from a list on the Kindle, no file editing needed
 - On-screen touch controls: D-pad, A, B, Start, Select, and a menu
 - Battery saves work like the real cartridge, and won't corrupt if you unplug mid-write
@@ -74,9 +79,17 @@ it by copying the binary to `/var/tmp` first, so you're covered either way.
 1. Go to the [Releases page](https://github.com/itsParassharma/KindleBoy/releases)
    (every push is cross-compiled by GitHub Actions, so tagged releases always
    carry a ready-to-copy extension folder).
-2. Download the zip for your firmware:
-   - Firmware 5.16.3 or newer (e.g. a 10th-gen on 5.17.1) → **`kindleboy-kindlehf.zip`**
-   - Older firmware, or if the hf build won't launch → `kindleboy-kindlepw2.zip`
+2. Download the zip that matches your Kindle:
+
+   | Your Kindle | Zip |
+   |-------------|-----|
+   | 10th/11th gen on firmware 5.16.3+ (e.g. 5.17.1) | **`kindleboy-kindlehf.zip`** |
+   | Paperwhite 2 through 10th gen, older firmware | `kindleboy-kindlepw2.zip` |
+   | Kindle Touch (2011) or Paperwhite 1 | `kindleboy-kindle5.zip` |
+
+   Only the 10th gen has been tested on real hardware; the others are built the
+   same way and should work. If one doesn't launch, try `kindlepw2` (the widest
+   compatibility build) and let me know.
 3. Unzip it.
 4. Drop the `kindleboy` folder into `extensions/` on the Kindle.
 5. Put a `.gb` ROM in `roms/gb/` (it also checks the extension folder).
@@ -94,8 +107,10 @@ controls fill the bottom:
 - Bottom row: START, SELECT, MENU, DEGHOST, and FF (fast-forward).
 
 Tap MENU to pause, where you can save or load a state, switch between Fast and
-Quality display, clean up the screen, go back to the game list, or quit. You can
-hold a direction and press A at the same time. Multi-touch works.
+Quality display, clean up the screen, go back to the game list, or quit. On most
+Kindles multi-touch works, so you can hold a direction and press A at the same
+time. The older Kindle Touch and Paperwhite 1 only register one finger at a
+time, so combos like run-and-jump aren't possible on those.
 
 DEGHOST wipes any e-ink smearing straight away. FF runs the game at 3x, handy
 for grinding through dialog. Your progress saves on its own (`game.sav` for the

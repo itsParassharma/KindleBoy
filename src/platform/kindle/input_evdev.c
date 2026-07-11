@@ -39,6 +39,7 @@ extern volatile sig_atomic_t g_should_quit;
 
 static int  s_fd = -1;
 static int  s_cur_slot;
+static bool s_single_touch;   /* older Touch/PW1: ABS_X/Y + BTN_TOUCH, no MT slots */
 static struct { int x, y; bool active; } s_slot[MAX_SLOTS];
 
 static int  s_absx_min, s_absx_max, s_absy_min, s_absy_max;
@@ -56,11 +57,27 @@ static bool dev_has_mt(int fd)
 	return test_bit(bits, ABS_MT_POSITION_X);
 }
 
+/* Single-touch panel: plain ABS_X/ABS_Y plus a BTN_TOUCH key (the zForce IR
+ * frame on the Kindle Touch / PW1). Used only when no MT device turns up. */
+static bool dev_has_st(int fd)
+{
+	unsigned long abits[(ABS_MAX + 1) / (8 * sizeof(long)) + 1];
+	unsigned long kbits[(KEY_MAX + 1) / (8 * sizeof(long)) + 1];
+	memset(abits, 0, sizeof abits);
+	memset(kbits, 0, sizeof kbits);
+	if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof abits), abits) < 0) return false;
+	if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof kbits), kbits) < 0) return false;
+	return test_bit(abits, ABS_X) && test_bit(kbits, BTN_TOUCH);
+}
+
 static void read_ranges(int fd)
 {
 	struct input_absinfo ai;
-	if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &ai) == 0) { s_absx_min = ai.minimum; s_absx_max = ai.maximum; }
-	if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &ai) == 0) { s_absy_min = ai.minimum; s_absy_max = ai.maximum; }
+	/* MT axes if present, else the single-touch ABS_X/Y axes. */
+	int ax = s_single_touch ? ABS_X : ABS_MT_POSITION_X;
+	int ay = s_single_touch ? ABS_Y : ABS_MT_POSITION_Y;
+	if (ioctl(fd, EVIOCGABS(ax), &ai) == 0) { s_absx_min = ai.minimum; s_absx_max = ai.maximum; }
+	if (ioctl(fd, EVIOCGABS(ay), &ai) == 0) { s_absy_min = ai.minimum; s_absy_max = ai.maximum; }
 	if (s_absx_max <= s_absx_min) s_absx_max = s_absx_min + 1;
 	if (s_absy_max <= s_absy_min) s_absy_max = s_absy_min + 1;
 }
@@ -69,25 +86,49 @@ static void read_ranges(int fd)
 void kindle_input_open(void)
 {
 	char path[32];
+	int  st_fd = -1;              /* first single-touch fallback we spot */
+	char st_path[32] = { 0 };
+
+	/* Prefer a real multitouch device; keep the first single-touch one as a
+	 * fallback for older panels (Kindle Touch / PW1) that report no MT slots. */
 	for (int i = 0; i < 12; i++) {
 		snprintf(path, sizeof path, "/dev/input/event%d", i);
 		int fd = open(path, O_RDONLY | O_NONBLOCK);
 		if (fd < 0) continue;
 		if (dev_has_mt(fd)) {
 			s_fd = fd;
-			read_ranges(fd);
-			/* Grab the touchscreen exclusively. Without this every tap
-			 * ALSO reaches the Kindle UI underneath, which merrily opens
-			 * the library / home screen and repaints over the game. */
-			int grabbed = ioctl(fd, EVIOCGRAB, 1);
-			plat_log("input: touch on %s range x[%d,%d] y[%d,%d] grab=%s",
-				 path, s_absx_min, s_absx_max, s_absy_min, s_absy_max,
-				 grabbed == 0 ? "ok" : "FAILED");
+			s_single_touch = false;
+			snprintf(st_path, sizeof st_path, "%s", path);
 			break;
+		}
+		if (st_fd < 0 && dev_has_st(fd)) {   /* remember, keep scanning for MT */
+			st_fd = fd;
+			continue;
 		}
 		close(fd);
 	}
-	if (s_fd < 0) plat_log("input: no MT touch device found");
+
+	if (s_fd < 0 && st_fd >= 0) {            /* no MT found — use single-touch */
+		s_fd = st_fd;
+		s_single_touch = true;
+		snprintf(st_path, sizeof st_path, "(single-touch)");
+	} else if (st_fd >= 0 && st_fd != s_fd) {
+		close(st_fd);                        /* MT won; drop the fallback */
+	}
+
+	if (s_fd >= 0) {
+		read_ranges(s_fd);
+		/* Grab the touchscreen exclusively. Without this every tap ALSO reaches
+		 * the Kindle UI underneath, which merrily opens the library / home
+		 * screen and repaints over the game. */
+		int grabbed = ioctl(s_fd, EVIOCGRAB, 1);
+		plat_log("input: touch %s (%s) range x[%d,%d] y[%d,%d] grab=%s",
+			 st_path, s_single_touch ? "single" : "multi",
+			 s_absx_min, s_absx_max, s_absy_min, s_absy_max,
+			 grabbed == 0 ? "ok" : "FAILED");
+	} else {
+		plat_log("input: no touch device found");
+	}
 	for (int i = 0; i < MAX_SLOTS; i++) s_slot[i].active = false;
 }
 
@@ -142,10 +183,23 @@ void plat_input_poll(plat_input_t *out)
 					if (s_cur_slot >= 0 && s_cur_slot < MAX_SLOTS)
 						s_slot[s_cur_slot].y = ev.value;
 					break;
+				/* Single-touch panels report the one contact on ABS_X/Y. */
+				case ABS_X:
+					if (s_single_touch) s_slot[0].x = ev.value;
+					break;
+				case ABS_Y:
+					if (s_single_touch) s_slot[0].y = ev.value;
+					break;
 				}
-			} else if (ev.type == EV_KEY && ev.code == BTN_TOUCH && ev.value == 0) {
-				/* Snow-protocol: lift = all contacts up. */
-				for (int i = 0; i < MAX_SLOTS; i++) s_slot[i].active = false;
+			} else if (ev.type == EV_KEY && ev.code == BTN_TOUCH) {
+				if (ev.value) {
+					/* Press: single-touch panels have no tracking id, so
+					 * BTN_TOUCH is the only "finger down" signal. */
+					if (s_single_touch) s_slot[0].active = true;
+				} else {
+					/* Lift (also the snow-protocol "all up" on MT panels). */
+					for (int i = 0; i < MAX_SLOTS; i++) s_slot[i].active = false;
+				}
 			}
 		}
 	}

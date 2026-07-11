@@ -8,27 +8,28 @@
  * 160px * scale, and scale tops out around 7 even on the largest). */
 #define RENDER_MAX_W (GB_W * 12)
 
-/* 4-gray levels for QUALITY / GL16, indexed by DMG shade (0=white .. 3=black). */
-static const uint8_t gray4[4] = { 0xFF, 0xAA, 0x55, 0x00 };
-
-/* Black sub-pixel coverage per shade, out of 4 (2x2 Bayer cells).
- * shade 0 (white)=0/4, 1 (light)=1/4, 2 (dark)=3/4, 3 (black)=4/4. */
-static const uint8_t black_level[4] = { 0, 1, 3, 4 };
-
-/* 2x2 Bayer threshold matrix. A cell is black iff bayer[dy&1][dx&1] < level. */
+/* 2x2 Bayer threshold matrix. A cell is black iff bayer[dy&1][dx&1] < coverage,
+ * where coverage (0..4 black sub-pixels) is derived from the pixel's luma. */
 static const uint8_t bayer2[2][2] = { { 0, 2 }, { 3, 1 } };
 
-/* Precomputed dither: dither_bw[shade][dy&1][dx&1] == 0x00 (black) or 0xFF. */
-static uint8_t dither_bw[4][2][2];
+/* Precomputed 1-bit dither for every 8-bit luma:
+ * dither_bw[luma][dy&1][dx&1] == 0x00 (black) or 0xFF (white).
+ * The coverage formula rounds (255-luma)/255*4 to the nearest sub-pixel count;
+ * for the four DMG grays {0xFF,0xAA,0x55,0x00} it yields exactly {0,1,3,4},
+ * i.e. byte-identical output to the old fixed-shade dither, while giving CGB
+ * mid-tones a smooth checkerboard. */
+static uint8_t dither_bw[256][2][2];
 static bool    dither_ready = false;
 
 static void build_dither(void)
 {
-	for (int s = 0; s < 4; s++)
+	for (int l = 0; l < 256; l++) {
+		int cov = ((255 - l) * 4 + 127) / 255;   /* 0..4 black sub-pixels */
 		for (int dy = 0; dy < 2; dy++)
 			for (int dx = 0; dx < 2; dx++)
-				dither_bw[s][dy][dx] =
-					(bayer2[dy][dx] < black_level[s]) ? 0x00 : 0xFF;
+				dither_bw[l][dy][dx] =
+					(bayer2[dy][dx] < cov) ? 0x00 : 0xFF;
+	}
 	dither_ready = true;
 }
 
@@ -78,7 +79,7 @@ void render_game(const emu_t *e, const render_cfg_t *cfg, uint8_t *canvas,
 				const uint8_t *srow = e->lcd[sy];
 				int dx = 0;
 				for (int sx = 0; sx < GB_W; sx++) {
-					uint8_t g = gray4[srow[sx] & 3];
+					uint8_t g = srow[sx];   /* luma, straight to GL16 */
 					for (int rx = 0; rx < scale; rx++) row[dx++] = g;
 				}
 				for (int ry = 0; ry < scale; ry++) {
@@ -97,7 +98,7 @@ void render_game(const emu_t *e, const render_cfg_t *cfg, uint8_t *canvas,
 					if (!built[p]) {
 						int dx = 0;
 						for (int sx = 0; sx < GB_W; sx++) {
-							const uint8_t (*d)[2] = dither_bw[srow[sx] & 3];
+							const uint8_t (*d)[2] = dither_bw[srow[sx]];
 							for (int rx = 0; rx < scale; rx++) {
 								int dxa = ox + dx;
 								rowp[p][dx++] = d[p][dxa & 1];
@@ -118,10 +119,10 @@ void render_game(const emu_t *e, const render_cfg_t *cfg, uint8_t *canvas,
 				int dyp = dy & 1, dx = 0;
 				for (int sx = 0; sx < GB_W; sx++) {
 					if (quality) {
-						uint8_t g = gray4[srow[sx] & 3];
+						uint8_t g = srow[sx];
 						for (int rx = 0; rx < scale; rx++) drow[dx++] = g;
 					} else {
-						const uint8_t (*d)[2] = dither_bw[srow[sx] & 3];
+						const uint8_t (*d)[2] = dither_bw[srow[sx]];
 						for (int rx = 0; rx < scale; rx++) {
 							int dxa = ox + dx;
 							drow[dx++] = d[dyp][dxa & 1];
