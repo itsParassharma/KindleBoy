@@ -24,7 +24,7 @@ STD         = -std=gnu11
 # Shared, platform-independent sources.
 CORE_SRC = \
 	src/main.c \
-	src/core/emu.c src/core/render.c src/core/ui.c src/core/config.c \
+	src/core/emu.c src/core/render.c src/core/ui.c src/core/status.c src/core/config.c \
 	src/core/overlay.c src/core/browser.c src/core/menu.c src/core/app.c \
 	src/core/peanut_impl.c
 
@@ -78,7 +78,7 @@ deploy: build/kindleboy
 	@echo "deployed. On the Kindle: KUAL -> kindleboy. Put *.gb in roms/gb."
 
 # ---- test harnesses (native) ---------------------------------------------
-TEST_CORE = src/core/emu.c src/core/render.c src/core/ui.c src/core/config.c \
+TEST_CORE = src/core/emu.c src/core/render.c src/core/ui.c src/core/status.c src/core/config.c \
 	src/core/overlay.c src/core/browser.c src/core/menu.c src/core/app.c \
 	src/core/peanut_impl.c
 
