@@ -1,0 +1,65 @@
+name: build-kindle
+
+# Cross-compiles the Kindle binary in the cloud and uploads a ready-to-copy
+# extension folder as an artifact — so you don't need a local Linux toolchain.
+# Builds two variants: kindlehf (for firmware >= 5.16.3, e.g. 5.17.1) and
+# kindlepw2 (older / widest compatibility). Grab the one that matches, or try
+# both if unsure.
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: kindlehf
+            triple: arm-kindlehf-linux-gnueabihf
+            tarball: kindlehf.tar.gz
+          - target: kindlepw2
+            triple: arm-kindlepw2-linux-gnueabi
+            tarball: kindlepw2.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch koxtoolchain (${{ matrix.target }})
+        run: |
+          cd "$HOME"
+          wget -q "https://github.com/koreader/koxtoolchain/releases/download/2025.05/${{ matrix.tarball }}"
+          tar xf "${{ matrix.tarball }}"
+          GCC="$(find "$HOME" -type f -name '${{ matrix.triple }}-gcc' | head -1)"
+          test -n "$GCC" || { echo "toolchain gcc not found"; exit 1; }
+          echo "$(dirname "$GCC")" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain
+        run: ${{ matrix.triple }}-gcc --version
+
+      - name: Clone FBInk
+        run: git clone --recursive --depth 1 https://github.com/NiLuJe/FBInk vendor/FBInk
+
+      - name: Build FBInk + KindleBoy
+        run: |
+          make fbink  CROSS=${{ matrix.triple }}
+          make kindle CROSS=${{ matrix.triple }}
+          file build/kindleboy
+
+      - name: Package extension folder
+        run: |
+          rm -rf dist && mkdir -p dist/kindleboy/bin
+          cp -r kual/kindleboy/* dist/kindleboy/
+          cp build/kindleboy dist/kindleboy/bin/kindleboy
+          chmod +x dist/kindleboy/bin/*.sh dist/kindleboy/bin/kindleboy
+          (cd dist && zip -rq ../kindleboy-${{ matrix.target }}.zip kindleboy)
+          echo "Contents:" && unzip -l kindleboy-${{ matrix.target }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kindleboy-${{ matrix.target }}
+          path: kindleboy-${{ matrix.target }}.zip
+          if-no-files-found: error
