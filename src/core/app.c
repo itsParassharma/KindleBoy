@@ -83,6 +83,30 @@ static void show_browser(void)
 	plat_wait_refresh();
 }
 
+#if !defined(_WIN32)
+#include <sys/stat.h>
+static void ensure_dir(const char *p) { mkdir(p, 0777); }
+#else
+static void ensure_dir(const char *p) { (void)p; }
+#endif
+
+/* Find a folder that actually has ROMs in it. We look in the configured dir
+ * first, then a few obvious spots — including the extension's own folder, since
+ * that's a tempting place to drop a .gb (and where at least one person did).
+ * If nothing turns up, we leave the list empty pointing at the configured dir,
+ * so the on-screen "no ROMs" message names a real path to use. */
+static void rescan_roms(void)
+{
+	if (browser_scan(&browser, cfg->rom_dir) > 0) return;
+	static const char *cands[] = {
+		"/mnt/us/roms/gb", "/mnt/us/roms",
+		"/mnt/us/extensions/kindleboy", "/mnt/us/extensions/kindleboy/roms",
+	};
+	for (unsigned i = 0; i < sizeof cands / sizeof cands[0]; i++)
+		if (browser_scan(&browser, cands[i]) > 0) return;
+	browser_scan(&browser, cfg->rom_dir);
+}
+
 static void show_menu(void)
 {
 	menu_draw(&menu, canvas, fbw, fbh, cfg->quality_mode);
@@ -232,7 +256,7 @@ static void handle_menu_action(menu_action_t act)
 		emu_sram_flush(&emu);
 		emu_unload(&emu);
 		emu_loaded = false;
-		browser_scan(&browser, cfg->rom_dir);   /* refresh list */
+		rescan_roms();                          /* refresh list */
 		browser.touch_prev = true;              /* finger from this tap is still down */
 		state = APP_BROWSER;
 		show_browser();
@@ -278,7 +302,9 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 	}
 	overlay_layout(&overlay, &rcfg, fbw, fbh);
 
-	browser_scan(&browser, cfg->rom_dir);
+	ensure_dir("/mnt/us/roms");
+	ensure_dir("/mnt/us/roms/gb");
+	rescan_roms();
 	menu_reset(&menu);
 
 	if (autostart_rom && autostart_rom[0]) {
@@ -313,7 +339,9 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 		if (state == APP_BROWSER) {
 			bool changed = false;
 			int idx = browser_input(&browser, &in, fbw, fbh, &changed);
-			if (idx >= 0) {
+			if (idx == BROWSER_QUIT) {
+				state = APP_EXIT;
+			} else if (idx >= 0) {
 				if (!enter_playing(idx)) show_browser();  /* failed load: restore list */
 			} else if (changed) {
 				show_browser();

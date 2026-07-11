@@ -5,16 +5,16 @@
       "priority": 0,
       "items": [
         {
-          "name": "Play (normal)",
+          "name": "Play",
           "priority": 0,
           "action": "bin/run.sh",
+          "params": "stopfw",
           "exitmenu": true
         },
         {
-          "name": "Play (stop framework, max RAM)",
+          "name": "Play (keep Kindle UI - may stay hidden)",
           "priority": 1,
           "action": "bin/run.sh",
-          "params": "stopfw",
           "exitmenu": true
         }
       ]

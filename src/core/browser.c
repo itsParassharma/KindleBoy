@@ -16,6 +16,7 @@ typedef struct {
 	int row_h, rows_visible;
 	int btn_h;
 	int up_y, down_y;   /* scroll button rows (full width) */
+	int exit_x, exit_w; /* EXIT button, in the title bar, right-aligned */
 	int px;             /* text scale */
 } geom_t;
 
@@ -23,6 +24,8 @@ static void compute_geom(int cw, int ch, geom_t *g)
 {
 	g->px      = (cw >= 800) ? 3 : 2;
 	g->title_h = 12 * g->px;
+	g->exit_w  = 4 * 8 * g->px + 6 * g->px;   /* "EXIT" plus padding */
+	g->exit_x  = cw - g->exit_w;
 	g->btn_h   = 10 * g->px;
 	g->row_h   = 11 * g->px;
 	g->up_y    = g->title_h;
@@ -93,6 +96,10 @@ void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch)
 	ui_text(canvas, cw, ch, 8, g.px, title, g.px, 0x00);
 	ui_fill(canvas, cw, ch, 0, g.title_h - g.px, cw, g.px, 0x00);
 
+	/* EXIT button, top-right. */
+	ui_rect(canvas, cw, ch, g.exit_x, 0, g.exit_w, g.title_h - g.px, 0x00);
+	ui_text(canvas, cw, ch, g.exit_x + 3 * g.px, g.px, "EXIT", g.px, 0x00);
+
 	/* Scroll buttons. */
 	ui_rect(canvas, cw, ch, 0, g.up_y, cw, g.btn_h, 0x00);
 	ui_text(canvas, cw, ch, cw / 2 - 3 * g.px, g.up_y + g.px, "^", g.px, 0x00);
@@ -101,7 +108,11 @@ void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch)
 
 	if (b->count == 0) {
 		ui_text(canvas, cw, ch, 16, g.list_y + g.row_h,
-			"No ROMs. Copy *.gb here.", g.px, 0x00);
+			"No ROMs found.", g.px, 0x00);
+		ui_text(canvas, cw, ch, 16, g.list_y + g.row_h * 3,
+			"Put .gb files in:", g.px, 0x00);
+		ui_text(canvas, cw, ch, 16, g.list_y + g.row_h * 4,
+			b->dir, g.px, 0x00);
 		return;
 	}
 
@@ -143,8 +154,11 @@ int browser_input(browser_t *b, const plat_input_t *in, int cw, int ch, bool *ch
 	bool touching = in->count > 0;
 	if (touching && !b->touch_prev && b->count >= 0) {
 		int x = in->pts[0].x, y = in->pts[0].y;
-		(void)x;
-		if (y >= g.up_y && y < g.up_y + g.btn_h) {
+		if (y < g.title_h && x >= g.exit_x) {
+			b->touch_prev = touching;
+			if (changed) *changed = false;
+			return BROWSER_QUIT;                                /* EXIT tapped */
+		} else if (y >= g.up_y && y < g.up_y + g.btn_h) {
 			b->sel -= g.rows_visible; ch_flag = true;           /* page up */
 		} else if (y >= g.down_y && y < g.down_y + g.btn_h) {
 			b->sel += g.rows_visible; ch_flag = true;           /* page down */

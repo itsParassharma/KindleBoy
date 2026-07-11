@@ -61,7 +61,7 @@ kindle: build/kindleboy
 build/kindleboy: $(KINDLE_SRC) $(FBINK_LIB)
 	@mkdir -p build
 	$(CROSS_CC) $(STD) -O2 $(WARN) -DPLATFORM_KINDLE $(INCLUDES) -I$(FBINK_DIR) \
-		$(KINDLE_SRC) $(FBINK_LIB) -lm -static -o $@
+		$(KINDLE_SRC) $(FBINK_LIB) -lm -lrt -static -o $@
 	$(CROSS)-strip $@ || true
 	@echo "built $@"
 

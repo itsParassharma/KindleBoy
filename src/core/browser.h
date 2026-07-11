@@ -30,9 +30,12 @@ int  browser_scan(browser_t *b, const char *dir);
 /* Draw the list into the canvas. */
 void browser_draw(const browser_t *b, uint8_t *canvas, int cw, int ch);
 
-/* Process one poll of input. Returns the index of a ROM to launch, or -1.
- * Sets *changed when the visible list/selection changed (so the caller knows
- * to redraw — important on e-ink where we only refresh on change). */
+#define BROWSER_QUIT (-2)   /* returned when the EXIT button is tapped */
+
+/* Process one poll of input. Returns the index of a ROM to launch, BROWSER_QUIT
+ * if EXIT was tapped, or -1 for nothing. Sets *changed when the visible
+ * list/selection changed (so the caller knows to redraw — important on e-ink
+ * where we only refresh on change). */
 int  browser_input(browser_t *b, const plat_input_t *in, int cw, int ch, bool *changed);
 
 /* Build the absolute path of names[idx] into out. */
