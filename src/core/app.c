@@ -76,10 +76,17 @@ static void present_full(plat_refresh_t mode)
 	plat_present(0, 0, fbw, fbh, mode);
 }
 
+/* First paint after entering the browser must be a full GC16 flash: on e-ink a
+ * non-flashing refresh over whatever was on screen before (the Kindle home
+ * screen, a game) leaves ghosted remnants and half-visible buttons. Selection
+ * changes afterwards use the gentler non-flashing refresh. */
+static bool browser_needs_flash = true;
+
 static void show_browser(void)
 {
 	browser_draw(&browser, canvas, fbw, fbh);
-	present_full(REFRESH_QUALITY);
+	present_full(browser_needs_flash ? REFRESH_FLASH : REFRESH_QUALITY);
+	browser_needs_flash = false;
 	plat_wait_refresh();
 }
 
@@ -258,6 +265,7 @@ static void handle_menu_action(menu_action_t act)
 		emu_loaded = false;
 		rescan_roms();                          /* refresh list */
 		browser.touch_prev = true;              /* finger from this tap is still down */
+		browser_needs_flash = true;             /* clear the game off the panel */
 		state = APP_BROWSER;
 		show_browser();
 		break;
@@ -342,7 +350,10 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			if (idx == BROWSER_QUIT) {
 				state = APP_EXIT;
 			} else if (idx >= 0) {
-				if (!enter_playing(idx)) show_browser();  /* failed load: restore list */
+				if (!enter_playing(idx)) {
+					browser_needs_flash = true;   /* clear the error screen */
+					show_browser();
+				}
 			} else if (changed) {
 				show_browser();
 			}

@@ -26,6 +26,10 @@
 #define ABS_MT_SLOT 0x2f
 #endif
 
+#ifndef EVIOCGRAB
+#define EVIOCGRAB _IOW('E', 0x90, int)
+#endif
+
 #define MAX_SLOTS PLAT_MAX_TOUCHES
 
 /* Set by main.c's SIGTERM/SIGINT handler; a clean-exit request. */
@@ -70,8 +74,13 @@ void kindle_input_open(void)
 		if (dev_has_mt(fd)) {
 			s_fd = fd;
 			read_ranges(fd);
-			plat_log("input: touch on %s range x[%d,%d] y[%d,%d]",
-				 path, s_absx_min, s_absx_max, s_absy_min, s_absy_max);
+			/* Grab the touchscreen exclusively. Without this every tap
+			 * ALSO reaches the Kindle UI underneath, which merrily opens
+			 * the library / home screen and repaints over the game. */
+			int grabbed = ioctl(fd, EVIOCGRAB, 1);
+			plat_log("input: touch on %s range x[%d,%d] y[%d,%d] grab=%s",
+				 path, s_absx_min, s_absx_max, s_absy_min, s_absy_max,
+				 grabbed == 0 ? "ok" : "FAILED");
 			break;
 		}
 		close(fd);
@@ -155,5 +164,9 @@ void plat_input_poll(plat_input_t *out)
 
 void kindle_input_close(void)
 {
-	if (s_fd >= 0) { close(s_fd); s_fd = -1; }
+	if (s_fd >= 0) {
+		ioctl(s_fd, EVIOCGRAB, 0);   /* hand the touchscreen back to the UI */
+		close(s_fd);
+		s_fd = -1;
+	}
 }
