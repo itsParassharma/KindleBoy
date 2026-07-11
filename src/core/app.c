@@ -37,10 +37,11 @@
 #define PRESENT_QUALITY_US 450000     /* ~2.2 fps GL16 */
 #define QUIET_US           700000     /* still-scene threshold */
 #define A2_SOFT            120         /* A2 presents before a GL16 promo flashes */
-#define A2_HARD            480         /* A2 presents before a forced flash */
+#define DEGHOST_FLASH_US   20000000ull /* full cleanup flash cadence during play */
 #define QUALITY_FLASH_EVERY 40         /* GL16 presents between GC16 flashes */
 #define BAND_SMALL_ROWS    48          /* <= this many GB rows => partial refresh */
 #define RESYNC_FRAMES      4           /* accumulator catch-up clamp */
+#define FF_EXTRA_FRAMES    2           /* fast-forward = 1 + this per tick (3x) */
 
 typedef enum { APP_BROWSER, APP_PLAYING, APP_MENU, APP_EXIT } app_state_t;
 
@@ -65,9 +66,16 @@ static app_state_t   state;
 static uint64_t last_present_us;
 static uint64_t last_activity_us;
 static uint64_t last_autosave_us;
+static uint64_t last_flash_us;       /* last full cleanup flash */
 static int      a2_count;
 static int      quality_present_count;
 static bool     promoted;
+static bool     du_after_promo;      /* purge promo grays with one DU sweep */
+
+/* fast-forward + quick-save state */
+static bool     ff_on;
+static bool     prev_save_touch, prev_ff_touch;
+static uint64_t save_feedback_until;
 
 /* ---- helpers ------------------------------------------------------------- */
 
@@ -129,15 +137,17 @@ static void repaint_play(void)
 	ui_fill(canvas, fbw, fbh, 0, 0, fbw, fbh, 0xFF);
 	render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, cfg->quality_mode,
 		    &rx, &ry, &rw, &rh);
-	overlay_draw(&overlay, canvas, fbw, fbh);
+	overlay_draw(&overlay, canvas, fbw, fbh, ff_on);
 	present_full(REFRESH_FLASH);
 	plat_wait_refresh();
 
 	last_present_us = plat_now_us();
 	last_activity_us = last_present_us;
+	last_flash_us = last_present_us;
 	a2_count = 0;
 	quality_present_count = 0;
 	promoted = false;
+	du_after_promo = false;
 	emu_frame_consumed(&emu);
 }
 
@@ -160,6 +170,11 @@ static bool enter_playing(int idx)
 	}
 	emu_loaded = true;
 	emu.gb.direct.frame_skip = true;   /* rasterise at 30 Hz, emulate at 60 Hz */
+
+	/* Fresh game, fresh control state. */
+	ff_on = false;
+	prev_save_touch = prev_ff_touch = false;
+	save_feedback_until = 0;
 
 	/* Remember for next launch. */
 	strncpy(cfg->last_rom, path, sizeof cfg->last_rom - 1);
@@ -184,11 +199,26 @@ static void play_present(uint64_t now)
 		if (now - last_present_us < min_interval)
 			return;
 
-		/* Forced deghost when A2 ghosting has piled up. */
-		if (!quality && a2_count >= A2_HARD) {
+		/* Periodic full cleanup: a GC16 flash of the game area PLUS the
+		 * strip above it (where the Kindle clock likes to paint), so A2
+		 * residue and UI droppings never build up for long. */
+		if (!quality && now - last_flash_us >= DEGHOST_FLASH_US) {
 			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, false, &rx, &ry, &rw, &rh);
-			plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_FLASH);
+			plat_present(0, 0, fbw, rcfg.dst_y + rcfg.game_h, REFRESH_FLASH);
 			a2_count = 0;
+			last_flash_us = now;
+			du_after_promo = false;
+			emu_frame_consumed(&emu);
+			last_present_us = now;
+			return;
+		}
+
+		/* Action resumed after a 4-gray still: A2 can't erase gray pixels,
+		 * so run one DU sweep of the whole game rect to purge them first. */
+		if (!quality && du_after_promo) {
+			render_game(&emu, &rcfg, canvas, fbw, 0, GB_H - 1, false, &rx, &ry, &rw, &rh);
+			plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_BW);
+			du_after_promo = false;
 			emu_frame_consumed(&emu);
 			last_present_us = now;
 			return;
@@ -222,11 +252,13 @@ static void play_present(uint64_t now)
 			if (a2_count >= A2_SOFT) {
 				plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_FLASH);
 				a2_count = 0;
+				last_flash_us = now;
 			} else {
 				plat_present(rcfg.dst_x, rcfg.dst_y, rcfg.game_w, rcfg.game_h, REFRESH_QUALITY);
 				a2_count /= 2;
 			}
 			promoted = true;
+			du_after_promo = true;   /* purge the grays when action resumes */
 		}
 	}
 }
@@ -372,10 +404,10 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 		}
 
 		/* APP_PLAYING */
-		bool menu_tapped = false;
-		uint8_t joypad = overlay_map(&overlay, &in, &menu_tapped);
-		if (in.key_menu) menu_tapped = true;
-		if (menu_tapped) {
+		ov_specials_t sp;
+		uint8_t joypad = overlay_map(&overlay, &in, &sp);
+		if (in.key_menu) sp.menu = true;
+		if (sp.menu) {
 			emu_sram_flush(&emu);       /* good moment: stall is hidden by the flash */
 			menu_reset(&menu);
 			menu.touch_prev = true;     /* finger from this tap is still down */
@@ -385,7 +417,41 @@ int app_run(config_t *cfg_in, const char *cfg_path_in, const char *autostart_rom
 			continue;
 		}
 
+		/* Quick save: one tap on SAVE writes the save state; the button
+		 * inverts briefly so you know it took. */
+		if (sp.save && !prev_save_touch) {
+			emu_sram_flush(&emu);
+			emu_state_save(&emu);
+			int bx, by, bw2, bh2;
+			overlay_draw_special(&overlay, canvas, fbw, fbh, OV_SAVE, true,
+					     &bx, &by, &bw2, &bh2);
+			plat_present(bx, by, bw2, bh2, REFRESH_BW);
+			save_feedback_until = plat_now_us() + 700000;
+		}
+		if (save_feedback_until && plat_now_us() >= save_feedback_until) {
+			int bx, by, bw2, bh2;
+			overlay_draw_special(&overlay, canvas, fbw, fbh, OV_SAVE, false,
+					     &bx, &by, &bw2, &bh2);
+			plat_present(bx, by, bw2, bh2, REFRESH_BW);
+			save_feedback_until = 0;
+		}
+
+		/* Fast-forward: one tap toggles 3x speed; the button stays
+		 * inverted while it's on. */
+		if (sp.ff && !prev_ff_touch) {
+			ff_on = !ff_on;
+			int bx, by, bw2, bh2;
+			overlay_draw_special(&overlay, canvas, fbw, fbh, OV_FF, ff_on,
+					     &bx, &by, &bw2, &bh2);
+			plat_present(bx, by, bw2, bh2, REFRESH_BW);
+		}
+		prev_save_touch = sp.save;
+		prev_ff_touch   = sp.ff;
+
 		emu_run_frame(&emu, joypad);
+		if (ff_on)
+			for (int ff = 0; ff < FF_EXTRA_FRAMES; ff++)
+				emu_run_frame(&emu, joypad);
 
 		uint64_t now = plat_now_us();
 		play_present(now);

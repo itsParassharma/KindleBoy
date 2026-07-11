@@ -88,8 +88,10 @@ menu_action_t menu_input(menu_t *m, const plat_input_t *in, int cw, int ch, bool
 			int iy = y0 + i * (item_h + gap);
 			if (x >= panel_x && x < panel_x + panel_w &&
 			    y >= iy && y < iy + item_h) {
-				if (i == m->sel) act = ITEM_ACTIONS[i];   /* second tap confirms */
-				else { m->sel = i; ch_flag = true; }
+				/* One tap activates — menu items are all safe/undoable,
+				 * and select-then-confirm felt sluggish on e-ink. */
+				m->sel = i;
+				act = ITEM_ACTIONS[i];
 				break;
 			}
 		}
